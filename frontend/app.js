@@ -1,14 +1,14 @@
-/* Shipcheck Frontend JavaScript */
+/* Shipcheck + Sentinel Frontend JavaScript */
 
 const API_BASE = '/api';
 
 // State
 let currentProjectId = null;
 let currentScanId = null;
+let currentScanProjectId = null;
 let scanInterval = null;
-
-// Elements - will be initialized after DOM loads
-let sections = {};
+let runtimeRefreshInterval = null;
+let currentSection = 'dashboard';
 
 // DOM helpers
 function $(id) {
@@ -16,86 +16,198 @@ function $(id) {
 }
 
 function showSection(sectionName) {
-    console.log('showSection called:', sectionName);
-    const keyToFind = sectionName.endsWith('Section') ? sectionName : sectionName + 'Section';
-    const section = sections[keyToFind];
-    if (!section) {
-        console.error('Section not found:', sectionName, 'Available:', Object.keys(sections));
-        return;
+    currentSection = sectionName;
+    if (sectionName !== 'runtime' && runtimeRefreshInterval) {
+        clearInterval(runtimeRefreshInterval);
+        runtimeRefreshInterval = null;
     }
-    Object.keys(sections).forEach(key => {
-        if (key === keyToFind) {
-            sections[key].classList.add('active');
-            sections[key].style.display = 'block';
-        } else {
-            sections[key].classList.remove('active');
-            sections[key].style.display = 'none';
+    const sections = document.querySelectorAll('.section');
+    sections.forEach(section => {
+        section.classList.remove('active');
+        section.style.display = 'none';
+    });
+
+    const targetSection = $(sectionName + '-section');
+    if (targetSection) {
+        targetSection.classList.add('active');
+        targetSection.style.display = 'block';
+    }
+
+    // Update nav tabs
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.classList.remove('active');
+        if (tab.dataset.section === sectionName) {
+            tab.classList.add('active');
         }
     });
+
+    // Load section data
+    loadSectionData(sectionName);
+}
+
+function loadSectionData(sectionName) {
+    switch (sectionName) {
+        case 'dashboard':
+            loadDashboard();
+            break;
+        case 'projects':
+            loadProjects();
+            break;
+        case 'scan':
+            // Scan section shows progress, just ensure it's visible
+            break;
+        case 'findings':
+            loadFindings();
+            break;
+        case 'editor':
+            loadFileBrowser();
+            break;
+        case 'sandbox':
+            loadSandboxStatus();
+            break;
+        case 'runtime':
+            loadRuntimeDashboard();
+            startRuntimeAutoRefresh();
+            break;
+        case 'sentinel':
+            loadSentinelStatus();
+            break;
+        case 'reports':
+            loadReportPreview();
+            break;
+        case 'history':
+            loadHistory();
+            break;
+    }
 }
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOMContentLoaded fired');
-    // Initialize sections after DOM is ready
-    sections = {
-        projectSection: document.getElementById('project-section'),
-        scanSection: document.getElementById('scan-section'),
-        reportSection: document.getElementById('report-section')
-    };
-    console.log('Sections initialized:', Object.keys(sections));
+    // Setup nav tabs
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            showSection(tab.dataset.section);
+        });
+    });
 
-    const rescanBtn = $('rescan-btn');
-    if (rescanBtn) {
-        rescanBtn.addEventListener('click', function() {
+    // Dashboard shortcuts use the same navigation and scan workflow as the sidebar.
+    document.querySelectorAll('.dashboard-action[data-section]').forEach(button => {
+        button.addEventListener('click', () => showSection(button.dataset.section));
+    });
+    const dashboardScan = $('dashboard-scan-btn');
+    if (dashboardScan) {
+        dashboardScan.addEventListener('click', () => {
             if (currentProjectId) {
                 startScan(currentProjectId);
             } else {
-                showSection('projectSection');
+                showSection('projects');
             }
         });
     }
 
-    const downloadBtn = $('download-btn');
-    if (downloadBtn) {
-        downloadBtn.addEventListener('click', downloadReport);
-    }
-
-    loadProjects();
+    // Setup upload
     setupUpload();
-    checkHindsightStatus();
+    setupDataClear();
+
+    // Setup filters
+    setupFilters();
+
+    // Setup editor
+    setupEditor();
+
+    // Setup sandbox
+    setupSandbox();
+
+    setupRuntimeScan();
+
+    // Setup sentinel
+    setupSentinel();
+
+    // Setup reports
+    setupReports();
+
+    // Check status
+    checkGemmaStatus();
+    checkSentinelStatus();
+
+    // Load initial data
+    loadDashboard();
+    loadProjects();
 });
 
-// Check Hindsight Engine status
-async function checkHindsightStatus() {
-    const badgeText = $('hindsight-status-text');
-    const badge = $('hindsight-status-badge');
-    if (!badgeText || !badge) return;
-
-    try {
-        const response = await fetch(`${API_BASE}/hindsight/status`);
-        const status = await response.json();
-        if (status.connected) {
-            badgeText.textContent = `🧠 Hindsight Cloud Active (${status.bank_id})`;
-            badge.style.background = '#ecfdf5';
-            badge.style.color = '#047857';
-            badge.style.borderColor = '#a7f3d0';
-            badge.querySelector('.status-dot').style.background = '#10b981';
-        } else if (status.api_configured) {
-            badgeText.textContent = '🧠 Hindsight Configured (Offline Fallback)';
-            badge.style.background = '#fef3c7';
-            badge.style.color = '#b45309';
-            badge.style.borderColor = '#fde68a';
-            badge.querySelector('.status-dot').style.background = '#f59e0b';
-        } else {
-            badgeText.textContent = '🧠 Hindsight Local SQLite Engine';
+// Dashboard
+async function loadDashboard() {
+    if (!currentProjectId) {
+        // Try to get first project
+        try {
+            const response = await fetch(`${API_BASE}/projects`);
+            const projects = await response.json();
+            if (projects.length > 0) {
+                currentProjectId = projects[0].id;
+            } else {
+                return;
+            }
+        } catch (e) {
+            return;
         }
+    }
+
+    const requestedProjectId = currentProjectId;
+    try {
+        const response = await fetch(`${API_BASE}/projects/${requestedProjectId}/dashboard`);
+        const data = await response.json();
+        if (requestedProjectId !== currentProjectId) return;
+
+        // Update scores
+        const project = data.project || {};
+        $('score-security').textContent = project.security_score ?? '--';
+        $('score-privacy').textContent = project.privacy_score ?? '--';
+        $('score-production').textContent = project.production_readiness_score ?? '--';
+        $('score-reliability').textContent = project.reliability_score ?? '--';
+
+        // Update findings summary
+        const findings = data.findings_summary || {};
+        $('count-critical').textContent = findings.critical || 0;
+        $('count-high').textContent = findings.high || 0;
+        $('count-medium').textContent = findings.medium || 0;
+        $('count-low').textContent = findings.low || 0;
+        $('count-info').textContent = findings.info || 0;
+
+        // Update runtime status
+        const runtime = data.runtime_status || {};
+        $('runtime-sentinel').textContent = runtime.sentinel_enabled ? 'Enabled' : 'Not Enabled';
+        $('runtime-events').textContent = runtime.total_events || 0;
+        $('runtime-blocked').textContent = runtime.blocked_count || 0;
+        $('runtime-suspicious').textContent = runtime.suspicious_count || 0;
+
+        // Update project info
+        $('project-name').textContent = project.name || 'Unnamed project';
+        const tech = project.project_context || {};
+        const techStack = [
+            ...(tech.languages || []),
+            ...(tech.frameworks || []),
+            ...(tech.databases || [])
+        ].slice(0, 5).join(', ');
+        $('project-tech').textContent = techStack || 'Unknown';
+        $('project-last-scan').textContent = project.last_scan_at ? new Date(project.last_scan_at).toLocaleString() : 'Never';
+        $('project-total-scans').textContent = Array.isArray(data.scan_history) ? data.scan_history.length : 0;
+
     } catch (e) {
-        console.warn('Failed to fetch Hindsight status:', e);
+        console.error('Failed to load dashboard:', e);
     }
 }
 
-// Load projects
+function clearDashboard() {
+    const values = {
+        'score-security': '--', 'score-privacy': '--', 'score-production': '--', 'score-reliability': '--',
+        'count-critical': '0', 'count-high': '0', 'count-medium': '0', 'count-low': '0', 'count-info': '0',
+        'runtime-sentinel': 'Not Enabled', 'runtime-events': '0', 'runtime-blocked': '0', 'runtime-suspicious': '0',
+        'project-name': '--', 'project-tech': '--', 'project-last-scan': 'Never', 'project-total-scans': '0'
+    };
+    Object.entries(values).forEach(([id, value]) => { if ($(id)) $(id).textContent = value; });
+}
+
+// Projects
 async function loadProjects() {
     const container = $('projects-list');
     container.innerHTML = '<div class="loading"><div class="spinner"></div>Loading projects...</div>';
@@ -106,41 +218,44 @@ async function loadProjects() {
 
         if (projects.length === 0) {
             container.innerHTML = '<div class="empty-state">No projects yet. Upload your first project below.</div>';
-        } else {
-            container.innerHTML = projects.map(p => `
-                <div class="project-item" onclick="selectProject('${p.id}')">
-                    <div class="project-info">
-                        <div class="project-name">${p.name}</div>
-                        <div class="project-meta">${new Date(p.created_at).toLocaleString()}</div>
-                        ${renderTechBadges(p.project_context)}
-                    </div>
-                    <div class="project-actions">
-                        <button class="btn btn-sm btn-primary" onclick="startScan('${p.id}'); event.stopPropagation()">Scan Now</button>
-                    </div>
-                </div>
-            `).join('');
+            return;
         }
+
+        container.innerHTML = projects.map(p => `
+            <div class="project-item" onclick="selectProject('${p.id}')">
+                <div class="project-info">
+                    <div class="project-name">${escapeHtml(p.name)}</div>
+                    <div class="project-meta">${new Date(p.created_at).toLocaleString()}</div>
+                    ${renderTechBadges(p.project_context)}
+                </div>
+                <div class="project-actions">
+                    <button class="btn btn-sm btn-primary" onclick="startScan('${p.id}'); event.stopPropagation()">Scan Now</button>
+                </div>
+            </div>
+        `).join('');
     } catch (error) {
         container.innerHTML = `<div class="loading" style="color: var(--danger);">Failed to load projects: ${error.message}</div>`;
     }
 }
 
 function renderTechBadges(context) {
-    if (!context) return '';
+    const safeContext = context || {};
     const techs = [
-        ...(context.languages || []),
-        ...(context.frameworks || []),
-        ...(context.databases || []),
-        ...(context.deployment || [])
+        ...(safeContext.languages || []),
+        ...(safeContext.frameworks || []),
+        ...(safeContext.databases || []),
+        ...(safeContext.deployment || [])
     ];
-    if (techs.length === 0) return '';
-    return `<div class="project-tech">${techs.slice(0, 5).map(t => `<span class="tech-badge">${t}</span>`).join('')}${techs.length > 5 ? `<span class="tech-badge">+${techs.length - 5}</span>` : ''}</div>`;
+    if (techs.length === 0) return '<div class="project-tech"><span class="tech-badge">New</span></div>';
+    return `<div class="project-tech">${techs.slice(0, 5).map(t => `<span class="tech-badge">${escapeHtml(t)}</span>`).join('')}${techs.length > 5 ? `<span class="tech-badge">+${techs.length - 5}</span>` : ''}</div>`;
 }
 
-// Upload setup
+// Upload
 function setupUpload() {
     const uploadArea = $('upload-area');
     const fileInput = $('zip-upload');
+
+    if (!uploadArea || !fileInput) return;
 
     uploadArea.addEventListener('click', () => fileInput.click());
 
@@ -177,9 +292,8 @@ async function handleFileUpload(file) {
     const formData = new FormData();
     formData.append('file', file);
 
-    // Create project first
     const projectName = file.name.replace('.zip', '');
-    showSection('scanSection');
+    showSection('scan');
     updateScanProgress('Creating project...', 0);
 
     try {
@@ -193,11 +307,16 @@ async function handleFileUpload(file) {
 
         updateScanProgress('Uploading project...', 10);
 
-        // Upload ZIP
         const uploadResp = await fetch(`${API_BASE}/projects/${project.id}/upload`, {
             method: 'POST',
             body: formData
         });
+
+        if (!uploadResp.ok) {
+            const error = await uploadResp.json();
+            throw new Error(error.detail || 'Upload failed');
+        }
+
         const uploadResult = await uploadResp.json();
         currentProjectId = uploadResult.project_id;
 
@@ -210,11 +329,35 @@ async function handleFileUpload(file) {
     }
 }
 
-// Start scan
+// Scan
+function resetScanUI(message = 'Initializing...') {
+    clearInterval(scanInterval);
+    currentScanId = null;
+
+    const badge = $('scan-status-badge');
+    if (badge) {
+        badge.textContent = 'Queued';
+        badge.className = 'scan-status-badge queued';
+    }
+
+    const progressFill = $('progress-fill');
+    if (progressFill) {
+        progressFill.style.width = '0%';
+    }
+
+    const progressMessage = $('progress-message');
+    if (progressMessage) {
+        progressMessage.textContent = message;
+    }
+
+    const steps = document.querySelectorAll('.step');
+    steps.forEach(step => step.classList.remove('active', 'completed'));
+}
+
 async function startScan(projectId) {
+    clearInterval(scanInterval);
     currentProjectId = projectId;
-    $('scan-status-badge').textContent = 'Queued';
-    $('scan-status-badge').className = 'scan-status-badge queued';
+    resetScanUI('Scan queued...');
 
     try {
         const response = await fetch(`${API_BASE}/scans`, {
@@ -222,14 +365,28 @@ async function startScan(projectId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ project_id: projectId })
         });
+
+        if (!response.ok) {
+            const errorBody = await response.json().catch(() => ({}));
+            throw new Error(errorBody.detail || 'Scan start failed');
+        }
+
         const scan = await response.json();
         currentScanId = scan.id;
+        currentScanProjectId = projectId;
 
-        showSection('scanSection');
-        $('scan-status-badge').textContent = 'Queued';
-        $('scan-status-badge').className = 'scan-status-badge queued';
+        showSection('scan');
+        const badge = $('scan-status-badge');
+        if (badge) {
+            badge.textContent = 'Queued';
+            badge.className = 'scan-status-badge queued';
+        }
+        const progressMessage = $('progress-message');
+        if (progressMessage) {
+            progressMessage.textContent = 'Scan queued...';
+        }
 
-        // Start polling
+        clearInterval(scanInterval);
         scanInterval = setInterval(() => pollScanStatus(), 1500);
 
     } catch (error) {
@@ -238,13 +395,15 @@ async function startScan(projectId) {
     }
 }
 
-// Poll scan status
 async function pollScanStatus() {
     if (!currentScanId) return;
+    const polledScanId = currentScanId;
+    const polledProjectId = currentScanProjectId;
 
     try {
-        const response = await fetch(`${API_BASE}/scans/${currentScanId}/status`);
+        const response = await fetch(`${API_BASE}/scans/${polledScanId}/status`);
         const status = await response.json();
+        if (polledScanId !== currentScanId || polledProjectId !== currentProjectId) return;
 
         $('scan-status-badge').textContent = status.status.charAt(0).toUpperCase() + status.status.slice(1);
         $('scan-status-badge').className = `scan-status-badge ${status.status}`;
@@ -257,15 +416,21 @@ async function pollScanStatus() {
             $('progress-message').textContent = status.message;
         }
 
-        // Update steps
         updateScanSteps(status.progress);
 
-        if (status.status === 'completed' || status.status === 'failed') {
+        if (status.status === 'completed' || status.status === 'failed' || status.status === 'partial') {
             clearInterval(scanInterval);
-            if (status.status === 'completed') {
-                setTimeout(() => loadReport(), 500);
+            if (status.status === 'completed' || status.status === 'partial') {
+                $('scan-status-badge').textContent = 'Completed';
+                $('scan-status-badge').className = 'scan-status-badge completed';
+                setTimeout(() => {
+                    if (polledScanId !== currentScanId || polledProjectId !== currentProjectId) return;
+                    showSection('findings');
+                    loadFindings();
+                }, 500);
             } else {
                 updateScanProgress(status.error || 'Scan failed', 'failed');
+                currentScanId = null;
             }
         }
     } catch (error) {
@@ -274,238 +439,111 @@ async function pollScanStatus() {
 }
 
 function updateScanProgress(message, progress) {
-    $('progress-message').textContent = message;
-    if (typeof progress === 'number') {
-        $('progress-fill').style.width = `${progress}%`;
-    } else if (progress === 'failed') {
-        $('scan-status-badge').textContent = 'Failed';
-        $('scan-status-badge').className = 'scan-status-badge failed';
+    const progressMessage = $('progress-message');
+    if (progressMessage) {
+        progressMessage.textContent = message;
+    }
+
+    const progressFill = $('progress-fill');
+    if (progressFill && typeof progress === 'number') {
+        progressFill.style.width = `${Math.max(0, Math.min(progress, 100))}%`;
+    }
+
+    const badge = $('scan-status-badge');
+    if (badge) {
+        if (progress === 'failed') {
+            badge.textContent = 'Failed';
+            badge.className = 'scan-status-badge failed';
+        } else if (progress === 'running') {
+            badge.textContent = 'Running';
+            badge.className = 'scan-status-badge running';
+        }
     }
 }
 
 function updateScanSteps(progress) {
     const steps = document.querySelectorAll('.step');
+    const safeProgress = Number.isFinite(progress) ? Math.max(0, Math.min(progress, 100)) : 0;
+
     steps.forEach((step, index) => {
         step.classList.remove('active', 'completed');
         const stepProgress = ((index + 1) / 10) * 100;
-        if (progress >= stepProgress) {
+        if (safeProgress >= stepProgress) {
             step.classList.add('completed');
-        } else if (progress > 0) {
+        } else if (safeProgress > 0) {
             step.classList.add('active');
         }
     });
 }
 
-// Load report
-async function loadReport() {
-    try {
-        // Load scan report
-        const reportResp = await fetch(`${API_BASE}/reports/scan/${currentScanId}`);
-        const report = await reportResp.json();
+// Findings
+async function loadFindings() {
+    if (!currentProjectId) {
+        $('findings-list').innerHTML = '<div class="empty-state">No project selected</div>';
+        return;
+    }
 
-        // Load comparison
-        let comparison = null;
+    const requestedProjectId = currentProjectId;
+    if (!currentScanId || currentScanProjectId !== requestedProjectId) {
         try {
-            const compResp = await fetch(`${API_BASE}/reports/scan/${currentScanId}/comparison`);
-            comparison = await compResp.json();
+            const response = await fetch(`${API_BASE}/projects/${requestedProjectId}/dashboard`);
+            const data = await response.json();
+            if (requestedProjectId !== currentProjectId) return;
+            if (data.latest_scan) {
+                currentScanId = data.latest_scan.id;
+                currentScanProjectId = requestedProjectId;
+            } else {
+                $('findings-list').innerHTML = '<div class="empty-state">No scan results yet. Run a scan first.</div>';
+                return;
+            }
         } catch (e) {
-            // No previous scan
+            $('findings-list').innerHTML = '<div class="empty-state">No scan results yet. Run a scan first.</div>';
+            return;
+        }
+    }
+
+    const requestedScanId = currentScanId;
+
+    const category = $('filter-category').value;
+    const severity = $('filter-severity').value;
+
+    try {
+        const response = await fetch(`${API_BASE}/reports/scan/${requestedScanId}`);
+        const report = await response.json();
+        if (requestedProjectId !== currentProjectId || requestedScanId !== currentScanId) return;
+
+        let findings = report.findings || [];
+
+        // Apply filters
+        if (category !== 'all') {
+            findings = findings.filter(f => f.category === category);
+        }
+        if (severity !== 'all') {
+            findings = findings.filter(f => f.severity === severity);
         }
 
-        showSection('reportSection');
-
-        // Set project name
-        const projectResp = await fetch(`${API_BASE}/projects/${report.scan.project_id}`);
-        const project = await projectResp.json();
-        $('report-project-name').textContent = project.name;
-
-        // Render summary
-        renderSummary(report.scan.summary);
-
-        // Render comparison
-        if (comparison && comparison.previous_scan_id) {
-            renderComparison(comparison);
-        }
-
-        // Render AI analysis
-        if (report.ai_analysis && report.ai_analysis.summary) {
-            renderAIAnalysis(report.ai_analysis);
-        }
-
-        // Render findings
-        renderFindings(report.findings);
-
-        // Update scan status badge
-        $('scan-status-badge').textContent = 'Completed';
-        $('scan-status-badge').className = 'scan-status-badge completed';
+        renderFindings(findings);
 
     } catch (error) {
-        console.error('Report load error:', error);
+        console.error('Failed to load findings:', error);
+        $('findings-list').innerHTML = `<div class="loading" style="color: var(--danger);">Failed to load findings: ${error.message}</div>`;
     }
-}
-
-function renderSummary(summary) {
-    const container = $('summary-grid');
-    const bySeverity = summary.by_severity || {};
-    const totalCount = summary.total_findings || 0;
-
-    container.innerHTML = `
-        <div class="summary-card total">
-            <div class="summary-count">${totalCount}</div>
-            <div class="summary-label">Total Findings</div>
-        </div>
-        <div class="summary-card critical">
-            <div class="summary-count">${bySeverity.critical || 0}</div>
-            <div class="summary-label">Critical</div>
-        </div>
-        <div class="summary-card high">
-            <div class="summary-count">${bySeverity.high || 0}</div>
-            <div class="summary-label">High</div>
-        </div>
-        <div class="summary-card medium">
-            <div class="summary-count">${bySeverity.medium || 0}</div>
-            <div class="summary-label">Medium</div>
-        </div>
-        <div class="summary-card low">
-            <div class="summary-count">${bySeverity.low || 0}</div>
-            <div class="summary-label">Low</div>
-        </div>
-        <div class="summary-card info">
-            <div class="summary-count">${bySeverity.info || 0}</div>
-            <div class="summary-label">Info</div>
-        </div>
-    `;
-}
-
-function renderComparison(comparison) {
-    const card = $('comparison-card');
-    card.style.display = 'block';
-
-    const container = $('comparison-details');
-
-    const totalFixed = comparison.fixed_count || 0;
-    const totalUnresolved = comparison.unresolved_count || 0;
-    const totalNew = comparison.new_count || 0;
-    const totalReintroduced = comparison.reintroduced_count || 0;
-
-    const container_inner = document.createElement('div');
-    container_inner.className = 'comparison-summary';
-    container_inner.innerHTML = `
-        <div class="comparison-item fixed">
-            <div class="comparison-count">${totalFixed}</div>
-            <div class="comparison-label">Fixed</div>
-        </div>
-        <div class="comparison-item unresolved">
-            <div class="comparison-count">${totalUnresolved}</div>
-            <div class="comparison-label">Unresolved</div>
-        </div>
-        <div class="comparison-item new">
-            <div class="comparison-count">${totalNew}</div>
-            <div class="comparison-label">New</div>
-        </div>
-        <div class="comparison-item reintroduced">
-            <div class="comparison-count">${totalReintroduced}</div>
-            <div class="comparison-label">Reintroduced</div>
-        </div>
-    `;
-    container.innerHTML = '';
-    container.appendChild(container_inner);
-
-    // Add finding details
-    const detailsHtml = [];
-    if (totalFixed > 0) {
-        detailsHtml.push(`
-            <div class="comparison-section fixed">
-                <h4>Fixed (${totalFixed})</h4>
-                <div class="comparison-findings">
-                    ${(comparison.fixed_findings || []).map(f => `
-                        <div class="comparison-finding">
-                            <span>${f.title}</span>
-                            <span class="badge ${f.severity}">${f.severity}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `);
-    }
-    if (totalUnresolved > 0) {
-        detailsHtml.push(`
-            <div class="comparison-section unresolved">
-                <h4>Still Unresolved (${totalUnresolved})</h4>
-                <div class="comparison-findings">
-                    ${(comparison.unresolved_findings || []).map(f => `
-                        <div class="comparison-finding">
-                            <span>${f.title}</span>
-                            <span class="badge ${f.severity}">${f.severity}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `);
-    }
-    if (totalNew > 0) {
-        detailsHtml.push(`
-            <div class="comparison-section new">
-                <h4>New (${totalNew})</h4>
-                <div class="comparison-findings">
-                    ${(comparison.new_findings || []).map(f => `
-                        <div class="comparison-finding">
-                            <span>${f.title}</span>
-                            <span class="badge ${f.severity}">${f.severity}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `);
-    }
-
-    container.innerHTML += detailsHtml.join('');
-}
-
-function renderAIAnalysis(aiReport) {
-    const card = $('ai-analysis-card');
-    card.style.display = 'block';
-
-    const content = aiReport.summary || JSON.stringify(aiReport, null, 2);
-
-    let html = '<pre class="ai-content">' + escapeHtml(content) + '</pre>';
-
-    if (aiReport.priorities && aiReport.priorities.length > 0) {
-        html += '<h4 style="margin-top: 1rem; margin-bottom: 0.75rem;">Priority Findings</h4>';
-        html += '<div class="findings-list">';
-        aiReport.priorities.forEach(p => {
-            html += `<div class="finding-card">
-                <div class="finding-header">
-                    <div class="finding-title">${escapeHtml(p.title || p.issue || '')}</div>
-                    <div class="finding-badges">
-                        <span class="badge ${p.severity || 'medium'}">${p.severity || 'medium'}</span>
-                    </div>
-                </div>
-                <div class="finding-description">${escapeHtml(p.explanation || p.why_it_matters || p.recommendation || '')}</div>
-                ${p.action ? `<div class="finding-recommendation"><strong>Action:</strong><p>${escapeHtml(p.action)}</p></div>` : ''}
-            </div>`;
-        });
-        html += '</div>';
-    }
-
-    $('ai-content').innerHTML = html;
 }
 
 function renderFindings(findings) {
     const container = $('findings-list');
-    const allFindings = findings || [];
 
-    // Group by category
-    const byCategory = {};
-    allFindings.forEach(f => {
-        if (!byCategory[f.category]) byCategory[f.category] = [];
-        byCategory[f.category].push(f);
-    });
-
-    if (allFindings.length === 0) {
+    if (findings.length === 0) {
         container.innerHTML = '<div class="empty-state">No findings! Your project looks ready to ship.</div>';
         return;
     }
+
+    // Group by category
+    const byCategory = {};
+    findings.forEach(f => {
+        if (!byCategory[f.category]) byCategory[f.category] = [];
+        byCategory[f.category].push(f);
+    });
 
     let html = '';
     Object.keys(byCategory).forEach(category => {
@@ -527,12 +565,18 @@ function renderFindings(findings) {
                     ${f.file_path ? `<span><span style="color: var(--info);">📁</span> ${escapeHtml(f.file_path)}</span>` : ''}
                     ${f.line_number ? `<span><span style="color: var(--info);">📍</span> Line ${f.line_number}</span>` : ''}
                     ${f.confidence ? `<span><span style="color: var(--info);">🎯</span> Confidence: ${escapeHtml(f.confidence)}</span>` : ''}
+                    ${f.detection_source ? `<span><span style="color: var(--info);">🔍</span> Source: ${escapeHtml(f.detection_source)}</span>` : ''}
                     ${f.first_detected_scan && f.last_detected_scan !== f.first_detected_scan ? `<span style="color: var(--success);">✓ Recurring</span>` : ''}
                 </div>
                 ${f.recommendation ? `<div class="finding-recommendation"><strong>Recommendation:</strong><p>${escapeHtml(f.recommendation)}</p></div>` : ''}
+                ${f.ai_explanation ? `<div class="finding-ai"><strong>AI Explanation:</strong><p>${escapeHtml(f.ai_explanation)}</p></div>` : ''}
+                ${f.suggested_fix ? `<div class="finding-fix"><strong>Suggested Fix:</strong><pre>${escapeHtml(f.suggested_fix)}</pre></div>` : ''}
                 <div class="finding-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="openFile('${f.file_path}', ${f.line_number})">Open File</button>
+                    <button class="btn btn-sm btn-primary" onclick="generateGemmaFix('${f.id}')" style="background:#89b4fa; color:#11111b;">🤖 Propose Patch</button>
                     <button class="btn btn-sm btn-secondary" onclick="acknowledgeFinding('${f.id}')">Acknowledge</button>
                     <button class="btn btn-sm btn-secondary" onclick="markFixed('${f.id}')">Mark Fixed</button>
+                    <button class="btn btn-sm btn-secondary" onclick="ignoreFinding('${f.id}')">Ignore</button>
                 </div>
             </div>
         `).join('');
@@ -540,32 +584,840 @@ function renderFindings(findings) {
     });
 
     container.innerHTML = html;
-
-    // Setup tab filtering
-    setupTabs(allFindings);
 }
 
-function setupTabs(findings) {
-    const tabs = document.querySelectorAll('.tab-btn');
+function setupFilters() {
+    const categoryFilter = $('filter-category');
+    const severityFilter = $('filter-severity');
 
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
+    if (categoryFilter) {
+        categoryFilter.addEventListener('change', loadFindings);
+    }
+    if (severityFilter) {
+        severityFilter.addEventListener('change', loadFindings);
+    }
+}
 
-            const category = tab.dataset.category;
-            const container = $('findings-list');
-            const categorySections = container.querySelectorAll('.category-section');
+// Code Editor
+async function loadFileBrowser() {
+    if (!currentProjectId) {
+        $('file-browser').innerHTML = '<div class="empty-state">No project selected</div>';
+        return;
+    }
 
-            categorySections.forEach(section => {
-                if (category === 'all' || section.querySelector('h3').textContent.toLowerCase() === category) {
-                    section.style.display = 'block';
-                } else {
-                    section.style.display = 'none';
-                }
-            });
+    try {
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/files`);
+        const data = await response.json();
+
+        let html = '<div class="file-tree">';
+        html += '<div class="file-item directory" onclick="toggleDirectory(this)">📁 .</div>';
+
+        data.directories.forEach(dir => {
+            html += `<div class="file-item directory" onclick="loadDirectory('${dir.path}')">📁 ${escapeHtml(dir.name)}</div>`;
         });
-    });
+
+        data.files.forEach(file => {
+            html += `<div class="file-item file" onclick="openFile('${file.path}')">📄 ${escapeHtml(file.name)}</div>`;
+        });
+
+        html += '</div>';
+        $('file-browser').innerHTML = html;
+
+    } catch (e) {
+        $('file-browser').innerHTML = `<div class="empty-state">Failed to load files: ${e.message}</div>`;
+    }
+}
+
+async function loadDirectory(path) {
+    try {
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/files?path=${encodeURIComponent(path)}`);
+        const data = await response.json();
+
+        let html = '<div class="file-tree">';
+        html += `<div class="file-item directory" onclick="loadDirectory('${path.split('/').slice(0, -1).join('/')}')">📁 ..</div>`;
+
+        data.directories.forEach(dir => {
+            html += `<div class="file-item directory" onclick="loadDirectory('${dir.path}')">📁 ${escapeHtml(dir.name)}</div>`;
+        });
+
+        data.files.forEach(file => {
+            html += `<div class="file-item file" onclick="openFile('${file.path}')">📄 ${escapeHtml(file.name)}</div>`;
+        });
+
+        html += '</div>';
+        $('file-browser').innerHTML = html;
+
+    } catch (e) {
+        console.error('Failed to load directory:', e);
+    }
+}
+
+async function openFile(filePath, lineNumber) {
+    if (!currentProjectId) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/files/${encodeURIComponent(filePath)}`);
+        const data = await response.json();
+
+        $('editor-file-path').textContent = filePath;
+        $('code-editor').value = data.content;
+        $('code-editor').disabled = false;
+        $('editor-save-btn').disabled = false;
+
+        // Highlight line if specified
+        if (lineNumber) {
+            const lines = data.content.split('\n');
+            const start = Math.max(0, lineNumber - 5);
+            const end = Math.min(lines.length, lineNumber + 5);
+            const highlighted = lines.slice(start, end).map((line, i) => {
+                const lineNum = start + i + 1;
+                return lineNum === lineNumber ? `> ${line}` : `  ${line}`;
+            }).join('\n');
+            $('code-editor').value = highlighted;
+        }
+
+        // Store current file path for save
+        $('code-editor').dataset.filePath = filePath;
+
+    } catch (e) {
+        console.error('Failed to open file:', e);
+        alert('Failed to open file: ' + e.message);
+    }
+}
+
+function setupEditor() {
+    const saveBtn = $('editor-save-btn');
+    const codeEditor = $('code-editor');
+
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveFile);
+    }
+
+    if (codeEditor) {
+        // Ctrl+S to save
+        codeEditor.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                saveFile();
+            }
+        });
+    }
+}
+
+async function saveFile() {
+    const filePath = $('code-editor').dataset.filePath;
+    const content = $('code-editor').value;
+
+    if (!filePath || !currentProjectId) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/files/${encodeURIComponent(filePath)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+
+        if (response.ok) {
+            alert('File saved successfully');
+        } else {
+            const error = await response.json();
+            alert('Failed to save file: ' + (error.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Failed to save file:', e);
+        alert('Failed to save file: ' + e.message);
+    }
+}
+
+// Sandbox
+async function loadSandboxStatus() {
+    // Load sandbox status if available
+    $('sandbox-status-value').textContent = 'Idle';
+    $('sandbox-method').textContent = '--';
+    $('sandbox-checks').textContent = '0';
+    $('sandbox-results').innerHTML = '';
+}
+
+function setupSandbox() {
+    const executeBtn = $('sandbox-execute-btn');
+    const stopBtn = $('sandbox-stop-btn');
+
+    if (executeBtn) {
+        executeBtn.addEventListener('click', executeSandbox);
+    }
+    if (stopBtn) {
+        stopBtn.addEventListener('click', stopSandbox);
+    }
+}
+
+async function executeSandbox() {
+    if (!currentProjectId) {
+        alert('No project selected');
+        return;
+    }
+
+    $('sandbox-status-value').textContent = 'Running...';
+    $('sandbox-execute-btn').disabled = true;
+    $('sandbox-stop-btn').disabled = false;
+
+    try {
+        const response = await fetch(`${API_BASE}/sandbox/${currentProjectId}/execute`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+
+        // Poll for completion
+        const executionId = result.execution_id;
+        const pollInterval = setInterval(async () => {
+            try {
+                const statusResp = await fetch(`${API_BASE}/sandbox/${executionId}/status`);
+                const status = await statusResp.json();
+
+                if (status.status === 'completed' || status.status === 'failed' || status.status === 'stopped') {
+                    clearInterval(pollInterval);
+                    $('sandbox-status-value').textContent = status.status;
+                    $('sandbox-method').textContent = status.result?.method || '--';
+                    $('sandbox-checks').textContent = status.result?.checks?.length || 0;
+
+                    // Display results
+                    let resultsHtml = '<div class="sandbox-results-list">';
+                    (status.result?.checks || []).forEach(check => {
+                        const statusClass = check.status === 'passed' ? 'success' :
+                                          check.status === 'warning' ? 'warning' :
+                                          check.status === 'failed' ? 'danger' : 'info';
+                        resultsHtml += `<div class="sandbox-check ${statusClass}">
+                            <span class="check-name">${escapeHtml(check.check)}</span>
+                            <span class="check-status">${check.status}</span>
+                            ${check.detail ? `<span class="check-detail">${escapeHtml(check.detail)}</span>` : ''}
+                            ${check.reason ? `<span class="check-detail">${escapeHtml(check.reason)}</span>` : ''}
+                        </div>`;
+                    });
+                    resultsHtml += '</div>';
+                    $('sandbox-results').innerHTML = resultsHtml;
+
+                    $('sandbox-execute-btn').disabled = false;
+                    $('sandbox-stop-btn').disabled = true;
+                }
+            } catch (e) {
+                console.error('Sandbox status poll error:', e);
+            }
+        }, 2000);
+
+    } catch (e) {
+        console.error('Sandbox execution error:', e);
+        $('sandbox-status-value').textContent = 'Failed';
+        $('sandbox-execute-btn').disabled = false;
+        $('sandbox-stop-btn').disabled = true;
+    }
+}
+
+async function stopSandbox() {
+    // Stop is handled by clearing the execution
+    $('sandbox-status-value').textContent = 'Stopped';
+    $('sandbox-execute-btn').disabled = false;
+    $('sandbox-stop-btn').disabled = true;
+}
+
+// Runtime Monitoring
+function startRuntimeAutoRefresh() {
+    if (runtimeRefreshInterval) clearInterval(runtimeRefreshInterval);
+    runtimeRefreshInterval = setInterval(() => {
+        if (currentSection === 'runtime' && currentProjectId) {
+            loadRuntimeDashboard();
+        }
+    }, 3000);
+}
+
+function setupRuntimeScan() {
+    const button = $('runtime-scan-btn');
+    if (button) button.addEventListener('click', scanLocalRuntime);
+    const connectButton = $('runtime-connect-btn');
+    if (connectButton) connectButton.addEventListener('click', connectRuntimeProxy);
+}
+
+async function connectRuntimeProxy() {
+    if (!currentProjectId) { showSection('projects'); return; }
+    const input = $('runtime-url-input');
+    const resultBox = $('runtime-proxy-result');
+    const button = $('runtime-connect-btn');
+    button.disabled = true;
+    resultBox.textContent = 'Discovering your API endpoints…';
+    try {
+        const response = await fetch(`${API_BASE}/proxy/${currentProjectId}/connect`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: input.value.trim() })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Could not create proxy');
+        const proxyUrl = result.proxy_base_url;
+        const publicUrl = result.public_url;
+        const count = result.endpoints.reduce((total, endpoint) => total + endpoint.methods.length, 0);
+
+        let urlCardsHtml = `
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0;">
+                <span style="font-weight: 600; min-width: 125px; font-size: 0.85rem; color: var(--text-secondary);">Local Proxy:</span>
+                <code id="proxy-url-display" style="flex: 1; word-break: break-all;">${escapeHtml(proxyUrl)}</code>
+                <button class="btn btn-sm btn-secondary" id="copy-proxy-url-btn" onclick="copyProxyUrl('${escapeHtml(proxyUrl)}', 'copy-proxy-url-btn')">📋 Copy Local URL</button>
+            </div>`;
+
+        if (publicUrl) {
+            urlCardsHtml += `
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin: 0.4rem 0;">
+                <span style="font-weight: 600; min-width: 125px; font-size: 0.85rem; color: #38bdf8;">Cloudflare Public:</span>
+                <code id="public-url-display" style="flex: 1; word-break: break-all; color: #38bdf8; background: rgba(56, 189, 248, 0.08); padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.2);">${escapeHtml(publicUrl)}</code>
+                <button class="btn btn-sm btn-primary" id="copy-public-url-btn" onclick="copyProxyUrl('${escapeHtml(publicUrl)}', 'copy-public-url-btn')">🌐 Copy Public URL</button>
+            </div>`;
+        }
+
+        resultBox.innerHTML = `<strong>Protected proxy ready</strong>
+            ${urlCardsHtml}
+            <span style="display: block; margin-top: 0.5rem;">${escapeHtml(result.title)}: ${count} operation(s) discovered. Rate limit: ${result.rate_limit.requests} requests / ${result.rate_limit.window_seconds} seconds per client. Add a private client token header in your frontend for better DDoS visibility.</span>
+            <pre class="proxy-snippet">const id = localStorage.shipcheckClient || (localStorage.shipcheckClient = crypto.randomUUID());
+fetch('${publicUrl ? escapeHtml(publicUrl) : escapeHtml(proxyUrl)}/your-route', { headers: { 'X-Shipcheck-Client': id } });</pre>`;
+    } catch (error) {
+        resultBox.textContent = error.message;
+    } finally { button.disabled = false; }
+}
+
+function copyProxyUrl(url, elementId = 'copy-proxy-url-btn') {
+    const showSuccess = () => {
+        const btn = document.getElementById(elementId);
+        if (btn) {
+            const orig = btn.textContent;
+            btn.textContent = '✓ Copied!';
+            setTimeout(() => { btn.textContent = orig; }, 2000);
+        }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(showSuccess).catch(() => {
+            try {
+                const tempInput = document.createElement('textarea');
+                tempInput.value = url;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+                showSuccess();
+            } catch (e) {
+                prompt('Copy URL manually:', url);
+            }
+        });
+    } else {
+        try {
+            const tempInput = document.createElement('textarea');
+            tempInput.value = url;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            showSuccess();
+        } catch (e) {
+            prompt('Copy URL manually:', url);
+        }
+    }
+}
+
+function setupDataClear() {
+    const button = $('clear-data-btn');
+    if (button) button.addEventListener('click', clearAllShipcheckData);
+}
+
+async function clearAllShipcheckData() {
+    if (!confirm('Delete every Shipcheck project, scan, finding, runtime log, and uploaded file? This cannot be undone.')) return;
+    try {
+        const response = await fetch(`${API_BASE}/projects`, { method: 'DELETE' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Could not clear data');
+        currentProjectId = null; currentScanId = null; currentScanProjectId = null;
+        clearDashboard();
+        loadProjects();
+        alert('All Shipcheck project data was cleared.');
+    } catch (error) { alert(error.message); }
+}
+
+async function scanLocalRuntime() {
+    if (!currentProjectId) {
+        showSection('projects');
+        return;
+    }
+
+    const input = $('runtime-url-input');
+    const message = $('runtime-scan-message');
+    const button = $('runtime-scan-btn');
+    const url = input.value.trim();
+    if (!url) return;
+
+    button.disabled = true;
+    message.textContent = 'Scanning your local application…';
+    try {
+        const response = await fetch(`${API_BASE}/runtime/${currentProjectId}/scan-local`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Runtime scan failed');
+
+        const issues = [
+            result.missing_headers.length ? `missing ${result.missing_headers.length} security header(s)` : 'security headers checked',
+            result.not_found_status === 404 ? '404 behavior passed' : `unexpected 404 probe status (${result.not_found_status})`,
+            result.exposed_endpoints.length ? `exposed routes: ${result.exposed_endpoints.join(', ')}` : 'no common sensitive routes exposed'
+        ];
+        message.textContent = `Local scan complete: ${issues.join(' · ')}`;
+        loadRuntimeDashboard();
+    } catch (error) {
+        message.textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+}
+
+async function loadRuntimeDashboard() {
+    if (!currentProjectId) {
+        $('runtime-events-list').innerHTML = '<div class="empty-state">No project selected</div>';
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/runtime/${currentProjectId}/dashboard`);
+        const data = await response.json();
+
+        // Update stats
+        const stats = data.statistics;
+        $('runtime-total-events').textContent = stats.total_events || 0;
+        $('runtime-blocked-events').textContent = data.status.blocked_count || 0;
+        $('runtime-suspicious-events').textContent = data.status.suspicious_count || 0;
+
+        // Count by event type
+        const byType = stats.by_type || [];
+        const sqlInjection = byType.find(t => t.event_type === 'DB_QUERY')?.count || 0;
+        const xss = byType.find(t => t.event_type === 'HTML_RENDER')?.count || 0;
+        const rateAbuse = byType.find(t => t.event_type === 'RATE_ANOMALY')?.count || 0;
+
+        $('runtime-sql-injection').textContent = sqlInjection;
+        $('runtime-xss').textContent = xss;
+        $('runtime-rate-abuse').textContent = rateAbuse;
+
+        // Render events
+        const events = data.recent_events || [];
+        if (events.length === 0) {
+            $('runtime-events-list').innerHTML = '<div class="empty-state">No runtime events yet</div>';
+        } else {
+            let html = '<div class="events-list">';
+            events.forEach(event => {
+                const actionClass = event.action === 'BLOCKED' ? 'danger' :
+                                  event.action === 'SUSPICIOUS' ? 'warning' : 'info';
+                html += `<div class="event-item ${actionClass}">
+                    <div class="event-header">
+                        <span class="event-type">${escapeHtml(event.event_type)}</span>
+                        <span class="event-action">${escapeHtml(event.action)}</span>
+                        <span class="event-time">${new Date(event.timestamp).toLocaleString()}</span>
+                    </div>
+                    ${event.endpoint ? `<div class="event-endpoint">Endpoint: ${escapeHtml(event.endpoint)}</div>` : ''}
+                    ${event.evidence ? `<div class="event-evidence">${escapeHtml(event.evidence)}</div>` : ''}
+                    <div class="event-meta">
+                        <span>Confidence: ${escapeHtml(event.confidence)}</span>
+                        ${event.request_id ? `<span>Request: ${escapeHtml(event.request_id)}</span>` : ''}
+                    </div>
+                </div>`;
+            });
+            html += '</div>';
+            $('runtime-events-list').innerHTML = html;
+        }
+
+    } catch (e) {
+        console.error('Failed to load runtime dashboard:', e);
+        $('runtime-events-list').innerHTML = `<div class="empty-state">Failed to load runtime data: ${e.message}</div>`;
+    }
+}
+
+// Sentinel
+async function loadSentinelStatus() {
+    if (!currentProjectId) {
+        $('sentinel-status-value').textContent = 'No project selected';
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/sentinel/${currentProjectId}/status`);
+        const data = await response.json();
+
+        $('sentinel-status-value').textContent = data.enabled ? 'Enabled' : 'Not Integrated';
+        const policy = data.integration?.policy_name || 'Runtime proxy';
+        const engine = data.native_engine?.available ? 'C++ engine active' : 'Python fallback';
+        $('sentinel-framework').textContent = policy + ' · ' + engine;
+
+        // Load protections
+        const protectionsResp = await fetch(`${API_BASE}/sentinel/${currentProjectId}/protections`);
+        const protectionsData = await protectionsResp.json();
+
+        let html = '<div class="protections-grid">';
+        (protectionsData.protections || []).forEach(protection => {
+            html += `<div class="protection-item">
+                <div class="protection-name">${escapeHtml(protection.name)}</div>
+                <div class="protection-description">${escapeHtml(protection.description)}</div>
+                <div class="protection-status ${protection.enabled ? 'enabled' : 'disabled'}">
+                    ${protection.enabled ? '✓ Enabled' : '○ Available'}
+                </div>
+            </div>`;
+        });
+        html += '</div>';
+        $('protections-list').innerHTML = html;
+
+    } catch (e) {
+        console.error('Failed to load Sentinel status:', e);
+    }
+}
+
+function setupSentinel() {
+    const previewBtn = $('sentinel-preview-btn');
+    const enableBtn = $('sentinel-enable-btn');
+    const confirmBtn = $('sentinel-confirm-btn');
+    const cancelBtn = $('sentinel-cancel-btn');
+
+    if (previewBtn) {
+        previewBtn.addEventListener('click', previewSentinelIntegration);
+    }
+    if (enableBtn) {
+        enableBtn.addEventListener('click', enableSentinel);
+    }
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', enableSentinel);
+    }
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+            $('sentinel-preview').style.display = 'none';
+        });
+    }
+}
+
+async function previewSentinelIntegration() {
+    if (!currentProjectId) {
+        alert('No project selected');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/sentinel/${currentProjectId}/preview`);
+        const data = await response.json();
+
+        let html = '<div class="preview-details">';
+        html += `<div class="preview-item"><strong>Framework:</strong> ${escapeHtml(data.framework)}</div>`;
+        html += `<div class="preview-item"><strong>Estimated Latency:</strong> ${escapeHtml(data.estimated_latency)}</div>`;
+        html += '<div class="preview-item"><strong>Protection Features:</strong><ul>';
+        data.protection_features.forEach(feature => {
+            html += `<li>${escapeHtml(feature)}</li>`;
+        });
+        html += '</ul></div>';
+        html += '<div class="preview-item"><strong>Files to be modified:</strong><ul>';
+        data.files_modified.forEach(file => {
+            html += `<li>${escapeHtml(file)}</li>`;
+        });
+        html += '</ul></div>';
+        html += '<div class="preview-item"><strong>Dependencies to add:</strong><ul>';
+        data.dependencies.forEach(dep => {
+            html += `<li>${escapeHtml(dep)}</li>`;
+        });
+        html += '</ul></div>';
+        html += '</div>';
+
+        $('sentinel-preview-content').innerHTML = html;
+        $('sentinel-preview').style.display = 'block';
+
+    } catch (e) {
+        console.error('Failed to preview Sentinel integration:', e);
+        alert('Failed to preview integration: ' + e.message);
+    }
+}
+
+async function enableSentinel() {
+    if (!currentProjectId) {
+        alert('No project selected');
+        return;
+    }
+
+    if (!confirm('Enable Sentinel RASP protection? This will modify your project files and dependencies.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/sentinel/${currentProjectId}/enable`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ approved: true })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            alert('Sentinel RASP integrated successfully!\n\nFiles modified: ' + data.applied_files.join(', '));
+            loadSentinelStatus();
+            checkSentinelStatus();
+        } else {
+            const error = await response.json();
+            alert('Failed to enable Sentinel: ' + (error.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        console.error('Failed to enable Sentinel:', e);
+        alert('Failed to enable Sentinel: ' + e.message);
+    }
+}
+
+// Reports
+async function loadReportPreview() {
+    if (!currentProjectId) {
+        $('report-preview-content').innerHTML = '<div class="empty-state">No project selected</div>';
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/reports/project/${currentProjectId}/full`);
+        const data = await response.json();
+
+        let html = '<div class="report-summary">';
+        html += `<div class="report-item"><strong>Project:</strong> ${escapeHtml(data.project.name)}</div>`;
+        html += `<div class="report-item"><strong>Total Findings:</strong> ${data.total_findings}</div>`;
+        html += `<div class="report-item"><strong>Security Score:</strong> ${data.project.security_score || 'N/A'}</div>`;
+        html += `<div class="report-item"><strong>Privacy Score:</strong> ${data.project.privacy_score || 'N/A'}</div>`;
+        html += `<div class="report-item"><strong>Production Readiness:</strong> ${data.project.production_readiness_score || 'N/A'}</div>`;
+        html += `<div class="report-item"><strong>Reliability Score:</strong> ${data.project.reliability_score || 'N/A'}</div>`;
+        html += `<div class="report-item"><strong>Sentinel Enabled:</strong> ${data.project.sentinel_enabled ? 'Yes' : 'No'}</div>`;
+        html += '</div>';
+
+        $('report-preview-content').innerHTML = html;
+
+    } catch (e) {
+        console.error('Failed to load report preview:', e);
+    }
+}
+
+function setupReports() {
+    const jsonBtn = $('report-json-btn');
+    const htmlBtn = $('report-html-btn');
+    const pdfBtn = $('report-pdf-btn');
+
+    if (jsonBtn) {
+        jsonBtn.addEventListener('click', () => exportReport('json'));
+    }
+    if (htmlBtn) {
+        htmlBtn.addEventListener('click', () => exportReport('html'));
+    }
+    if (pdfBtn) {
+        pdfBtn.addEventListener('click', () => exportReport('pdf'));
+    }
+}
+
+async function exportReport(format) {
+    if (!currentProjectId) {
+        alert('No project selected');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/reports/project/${currentProjectId}/export?format=${format}`);
+
+        if (format === 'json') {
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `shipcheck-report-${currentProjectId.substring(0, 8)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } else {
+            // For HTML/PDF, open in new window
+            const html = await response.text();
+            const newWindow = window.open('', '_blank');
+            newWindow.document.write(html);
+            newWindow.document.close();
+        }
+    } catch (e) {
+        console.error('Export error:', e);
+        alert('Failed to export report: ' + e.message);
+    }
+}
+
+// History
+async function loadHistory() {
+    if (!currentProjectId) {
+        $('history-list').innerHTML = '<div class="empty-state">No project selected</div>';
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/reports/project/${currentProjectId}/history`);
+        const data = await response.json();
+
+        if (data.history.length === 0) {
+            $('history-list').innerHTML = '<div class="empty-state">No scan history yet</div>';
+            return;
+        }
+
+        let html = '<div class="history-timeline">';
+        data.history.forEach(scan => {
+            const summary = scan.summary || {};
+            const bySeverity = summary.by_severity || {};
+            html += `<div class="history-item">
+                <div class="history-header">
+                    <span class="history-id">${scan.id.substring(0, 8)}</span>
+                    <span class="history-status ${scan.status}">${scan.status}</span>
+                    <span class="history-date">${new Date(scan.completed_at).toLocaleString()}</span>
+                </div>
+                <div class="history-summary">
+                    <span class="history-count critical">Critical: ${bySeverity.critical || 0}</span>
+                    <span class="history-count high">High: ${bySeverity.high || 0}</span>
+                    <span class="history-count medium">Medium: ${bySeverity.medium || 0}</span>
+                    <span class="history-count low">Low: ${bySeverity.low || 0}</span>
+                    <span class="history-count info">Info: ${bySeverity.info || 0}</span>
+                    <span class="history-count total">Total: ${summary.total_findings || 0}</span>
+                </div>
+            </div>`;
+        });
+        html += '</div>';
+
+        $('history-list').innerHTML = html;
+
+    } catch (e) {
+        console.error('Failed to load history:', e);
+        $('history-list').innerHTML = `<div class="empty-state">Failed to load history: ${e.message}</div>`;
+    }
+}
+
+// Status checks
+async function checkGemmaStatus() {
+    const badgeText = document.getElementById('gemma-status-text');
+    const badge = document.getElementById('gemma-status-badge');
+    if (!badgeText || !badge) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/health`);
+        if (response.ok) {
+            badgeText.textContent = 'Gemma Remediation Active';
+            badge.classList.add('connected');
+        } else {
+            badgeText.textContent = 'Gemma Offline';
+        }
+    } catch (e) {
+        badgeText.textContent = 'Gemma Offline';
+    }
+}
+
+async function generateGemmaFix(findingId) {
+    const container = document.getElementById('remediation-details');
+    if (container) {
+        container.innerHTML = '<div class="loading">Generating Gemma AI patch proposal...</div>';
+    }
+    showSection('remediation');
+
+    try {
+        const res = await fetch(`${API_BASE}/remediation/propose/${findingId}`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+            container.innerHTML = `<div class="error">Error generating proposal: ${data.detail || 'Unknown error'}</div>`;
+            return;
+        }
+
+        renderRemediationProposal(data);
+    } catch (e) {
+        if (container) container.innerHTML = `<div class="error">Network error: ${e.message}</div>`;
+    }
+}
+
+function renderRemediationProposal(proposal) {
+    const container = document.getElementById('remediation-details');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div class="proposal-card" style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 8px; margin-top: 1rem;">
+            <h3>Patch Proposal #${proposal.proposal_id.slice(0, 8)}</h3>
+            <p><strong>File Path:</strong> <code>${proposal.file_path}</code></p>
+            <p><strong>Summary:</strong> ${proposal.summary}</p>
+            <p><strong>Root Cause:</strong> ${proposal.root_cause}</p>
+            <p><strong>Security Effect:</strong> ${proposal.expected_security_effect}</p>
+            
+            <h4 style="margin-top:1rem;">Proposed Diff Patch:</h4>
+            <pre style="background: #1e1e2e; color: #a6e3a1; padding: 1rem; border-radius: 6px; overflow-x: auto;">${proposal.patch_diff}</pre>
+
+            <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
+                <button class="btn btn-primary" onclick="reviewGemmaFix('${proposal.proposal_id}', 'approve')">Approve Patch</button>
+                <button class="btn btn-secondary" onclick="reviewGemmaFix('${proposal.proposal_id}', 'reject')">Reject Patch</button>
+                <button class="btn btn-primary" id="btn-verify-${proposal.proposal_id}" style="background:#89b4fa; display:none;" onclick="verifyGemmaFix('${proposal.proposal_id}')">Run Dual Verification →</button>
+            </div>
+            <div id="proposal-status-${proposal.proposal_id}" style="margin-top: 1rem; font-weight: bold;">Status: ${proposal.status}</div>
+        </div>
+    `;
+}
+
+async function reviewGemmaFix(proposalId, action) {
+    try {
+        const res = await fetch(`${API_BASE}/remediation/review/${proposalId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action })
+        });
+        const data = await res.json();
+        const statusEl = document.getElementById(`proposal-status-${proposalId}`);
+        const verifyBtn = document.getElementById(`btn-verify-${proposalId}`);
+        if (statusEl) statusEl.textContent = `Status: ${data.status}`;
+        if (action === 'approve' && verifyBtn) {
+            verifyBtn.style.display = 'inline-block';
+        }
+    } catch (e) {
+        alert('Failed to review patch: ' + e.message);
+    }
+}
+
+async function verifyGemmaFix(proposalId) {
+    showSection('verification');
+    const container = document.getElementById('verification-evidence-list');
+    if (container) container.innerHTML = '<div class="loading">Running dual-baseline verification harness...</div>';
+
+    try {
+        const res = await fetch(`${API_BASE}/remediation/verify/${proposalId}`, { method: 'POST' });
+        const data = await res.json();
+        
+        if (container) {
+            const isVerified = data.status === 'VERIFIED';
+            container.innerHTML = `
+                <div class="evidence-card" style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 8px;">
+                    <h3 style="color: ${isVerified ? '#a6e3a1' : '#f38ba8'};">Verification Status: ${data.status}</h3>
+                    <p><strong>Proposal ID:</strong> ${data.proposal_id}</p>
+                    <p><strong>Finding ID:</strong> ${data.finding_id}</p>
+                    <p><strong>Baseline Test:</strong> ${data.baseline_test_status}</p>
+                    <p><strong>Patched Test:</strong> ${data.patched_test_status}</p>
+                    <p><strong>Syntax Validation:</strong> ${data.syntax_status}</p>
+                    <p><strong>Details:</strong> ${data.details}</p>
+                </div>
+            `;
+        }
+    } catch (e) {
+        if (container) container.innerHTML = `<div class="error">Verification error: ${e.message}</div>`;
+    }
+}
+
+async function checkSentinelStatus() {
+    const badgeText = $('sentinel-status-text');
+    const badge = $('sentinel-status-badge');
+    if (!badgeText || !badge) return;
+
+    if (!currentProjectId) {
+        badgeText.textContent = 'Sentinel RASP';
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/sentinel/${currentProjectId}/status`);
+        const data = await response.json();
+        if (data.enabled) {
+            badgeText.textContent = 'Sentinel Active';
+            badge.classList.add('active');
+        } else {
+            badgeText.textContent = 'Sentinel RASP';
+        }
+    } catch (e) {
+        console.warn('Failed to fetch Sentinel status:', e);
+    }
 }
 
 // Actions
@@ -576,7 +1428,7 @@ async function acknowledgeFinding(findingId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'acknowledged' })
         });
-        alert('Finding acknowledged. Rescan to see the updated status.');
+        loadFindings();
     } catch (e) {
         console.error('Failed to acknowledge finding:', e);
     }
@@ -589,35 +1441,52 @@ async function markFixed(findingId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'fixed' })
         });
-        alert('Finding marked as fixed. Rescan to verify.');
+        loadFindings();
     } catch (e) {
         console.error('Failed to mark finding:', e);
     }
 }
 
-async function selectProject(projectId) {
-    currentProjectId = projectId;
-    await startScan(projectId);
+async function ignoreFinding(findingId) {
+    try {
+        await fetch(`${API_BASE}/reports/findings/${findingId}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'ignored' })
+        });
+        loadFindings();
+    } catch (e) {
+        console.error('Failed to ignore finding:', e);
+    }
 }
 
-async function downloadReport() {
+async function generateFix(findingId) {
     try {
-        const reportResp = await fetch(`${API_BASE}/reports/scan/${currentScanId}`);
-        const report = await reportResp.json();
+        const response = await fetch(`${API_BASE}/fixes/${findingId}/details`);
+        const data = await response.json();
 
-        const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `shipcheck-report-${currentScanId.substring(0, 8)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        const suggestedFix = data.suggested_fix || data.recommendation || data.project_specific_solution || data.existing_solution;
+        if (suggestedFix) {
+            // Open file with fix
+            if (data.file_path) {
+                await openFile(data.file_path, data.line_number);
+            }
+            alert('Suggested fix:\n\n' + suggestedFix);
+        } else {
+            alert('No suggested fix available for this finding.');
+        }
     } catch (e) {
-        console.error('Download error:', e);
-        alert('Failed to download report.');
+        console.error('Failed to generate fix:', e);
+        alert('Failed to generate fix: ' + e.message);
     }
+}
+
+async function selectProject(projectId) {
+    clearInterval(scanInterval);
+    currentProjectId = projectId;
+    currentScanId = null;
+    currentScanProjectId = null;
+    showSection('dashboard');
 }
 
 function escapeHtml(text) {
@@ -627,68 +1496,44 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Global functions for inline onclick
-function startScan(projectId) {
-    if (typeof loadProjects !== 'undefined') {
-        startScanInternal(projectId);
-    }
-}
+// ============================================================
+// Download Project as ZIP
+// ============================================================
 
-async function startScanInternal(projectId) {
-    currentProjectId = projectId;
+async function downloadProjectZip() {
+    if (!currentProjectId) {
+        alert('No project selected.');
+        return;
+    }
 
     try {
-        const response = await fetch(`${API_BASE}/scans`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ project_id: projectId })
-        });
-        const scan = await response.json();
-        currentScanId = scan.id;
-
-        showSection('scanSection');
-        $('scan-status-badge').textContent = 'Queued';
-        $('scan-status-badge').className = 'scan-status-badge queued';
-        $('progress-message').textContent = 'Scan queued...';
-
-        // Start polling
-        scanInterval = setInterval(() => pollScanStatus(), 1500);
-
-    } catch (error) {
-        console.error('Scan start error:', error);
-        alert('Failed to start scan: ' + error.message);
-    }
-}
-
-function loadProjects() {
-    loadProjectsInternal();
-}
-
-async function loadProjectsInternal() {
-    const container = $('projects-list');
-    container.innerHTML = '<div class="loading"><div class="spinner"></div>Loading projects...</div>';
-
-    try {
-        const response = await fetch(`${API_BASE}/projects`);
-        const projects = await response.json();
-
-        if (projects.length === 0) {
-            container.innerHTML = '<div class="empty-state">No projects yet. Upload your first project below.</div>';
-        } else {
-            container.innerHTML = projects.map(p => `
-                <div class="project-item" onclick="selectProject('${p.id}')">
-                    <div class="project-info">
-                        <div class="project-name">${p.name}</div>
-                        <div class="project-meta">${new Date(p.created_at).toLocaleString()}</div>
-                        ${renderTechBadges(p.project_context)}
-                    </div>
-                    <div class="project-actions">
-                        <button class="btn btn-sm btn-primary" onclick="startScan('${p.id}'); event.stopPropagation()">Scan Now</button>
-                    </div>
-                </div>
-            `).join('');
+        const response = await fetch(`${API_BASE}/projects/${currentProjectId}/download`);
+        if (!response.ok) {
+            const err = await response.json();
+            alert('Download failed: ' + (err.detail || 'Unknown error'));
+            return;
         }
-    } catch (error) {
-        container.innerHTML = `<div class="loading" style="color: var(--danger);">Failed to load projects: ${error.message}</div>`;
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+
+        // Extract filename from Content-Disposition header
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = 'project-fixed.zip';
+        if (disposition) {
+            const match = disposition.match(/filename="?(.+?)"?$/);
+            if (match) filename = match[1];
+        }
+
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        alert('Download failed: ' + e.message);
     }
 }
+

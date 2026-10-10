@@ -17,10 +17,30 @@ class Finding:
     evidence: str
     file_path: Optional[str] = None
     line_number: Optional[int] = None
-    confidence: str = "medium"  # high, medium, low
+    confidence: str = "medium"  # confirmed, high, medium, low
     recommendation: str = ""
-    status: str = "open"  # open, fixed, acknowledged
+    status: str = "open"  # open, fixed, acknowledged, ignored, false_positive
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Extended fields for comprehensive findings
+    ai_explanation: Optional[str] = None
+    suggested_fix: Optional[str] = None
+    existing_solution: Optional[str] = None
+    project_specific_solution: Optional[str] = None
+    detection_source: str = "STATIC"  # STATIC, DYNAMIC, DEPENDENCY, CONFIGURATION, RUNTIME, AI, MULTIPLE
+    validation_status: Optional[str] = None
+    validation_result: Optional[str] = None
+    fix_applied: bool = False
+    fix_validated: bool = False
+
+    def __post_init__(self):
+        """Keep the actionable rule guidance available as a suggested fix.
+
+        Rule-based scans do not require an LLM; their recommendation is the
+        reliable offline fix guidance.  Preserve it in both fields so all API
+        consumers can present it consistently.
+        """
+        if not self.suggested_fix and self.recommendation:
+            self.suggested_fix = self.recommendation
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -34,7 +54,16 @@ class Finding:
             "confidence": self.confidence,
             "recommendation": self.recommendation,
             "status": self.status,
-            "metadata": self.metadata
+            "metadata": self.metadata,
+            "ai_explanation": self.ai_explanation,
+            "suggested_fix": self.suggested_fix,
+            "existing_solution": self.existing_solution,
+            "project_specific_solution": self.project_specific_solution,
+            "detection_source": self.detection_source,
+            "validation_status": self.validation_status,
+            "validation_result": self.validation_result,
+            "fix_applied": self.fix_applied,
+            "fix_validated": self.fix_validated
         }
 
 
@@ -56,7 +85,7 @@ class BaseScanner(ABC):
         if extensions is None:
             extensions = [".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go", ".rs", ".php", ".rb", ".cs", ".cpp", ".c", ".kt", ".swift"]
 
-        ignore_dirs = {".git", "venv", "node_modules", "__pycache__", "dist", "build", ".next", "target", "vendor", ".idea", ".vscode", "env", ".env"}
+        ignore_dirs = {".git", "venv", ".venv", "node_modules", "__pycache__", "dist", "build", ".next", "target", "vendor", ".idea", ".vscode", "env", ".env", ".pytest_cache", ".shipcheck_cache"}
 
         files = []
         for ext in extensions:
@@ -89,3 +118,19 @@ class BaseScanner(ABC):
     def _add_finding(self, finding: Finding):
         """Add a finding to the scanner's findings."""
         self.findings.append(finding)
+
+    def _generate_ai_explanation(self, finding: Finding) -> str:
+        """Generate AI explanation for a finding."""
+        return f"AI Analysis: {finding.title}. {finding.description}"
+
+    def _generate_suggested_fix(self, finding: Finding) -> str:
+        """Generate suggested fix for a finding."""
+        return finding.recommendation
+
+    def _generate_existing_solution(self, finding: Finding) -> str:
+        """Generate existing/common solution for a finding."""
+        return f"Industry standard solution: {finding.recommendation}"
+
+    def _generate_project_specific_solution(self, finding: Finding) -> str:
+        """Generate project-specific solution for a finding."""
+        return f"Project-specific fix for {finding.file_path}: {finding.recommendation}"

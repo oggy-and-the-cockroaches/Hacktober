@@ -9,8 +9,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 
-from database.schema import get_connection
-from scanners.base import Finding
+from backend.database.schema import get_connection
+from backend.scanners.base import Finding
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -259,9 +259,10 @@ class HindsightService:
 
         project_name = project_context.get("name", "Unknown Project")
         cursor.execute("""
-            INSERT OR REPLACE INTO projects (id, name, project_context, last_scan_at)
-            VALUES (?, ?, ?, ?)
-        """, (project_id, project_name, json.dumps(project_context), datetime.utcnow().isoformat()))
+            UPDATE projects
+            SET name = ?, project_context = ?, last_scan_at = ?
+            WHERE id = ?
+        """, (project_name, json.dumps(project_context), datetime.utcnow().isoformat(), project_id))
 
         summary = {
             "total_findings": len(findings),
@@ -276,14 +277,27 @@ class HindsightService:
         for finding in findings:
             finding_id = self._get_or_create_finding_id(project_id, finding)
             cursor.execute("""
-                INSERT OR REPLACE INTO findings (id, scan_id, category, severity, title, description, evidence, file_path, line_number, confidence, recommendation, status, first_detected_scan, last_detected_scan)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO findings (
+                    id, scan_id, category, severity, title, description, evidence,
+                    file_path, line_number, confidence, recommendation, status,
+                    first_detected_scan, last_detected_scan,
+                    ai_explanation, suggested_fix, existing_solution, project_specific_solution,
+                    detection_source, validation_status, validation_result,
+                    fix_applied, fix_validated
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 finding_id, scan_id, finding.category, finding.severity, finding.title,
                 finding.description, finding.evidence, finding.file_path, finding.line_number,
                 finding.confidence, finding.recommendation, finding.status,
                 finding.metadata.get("first_detected_scan", scan_id),
-                scan_id
+                scan_id,
+                finding.ai_explanation, finding.suggested_fix,
+                finding.existing_solution, finding.project_specific_solution,
+                finding.detection_source, finding.validation_status,
+                finding.validation_result,
+                1 if finding.fix_applied else 0,
+                1 if finding.fix_validated else 0
             ))
 
         self.conn.commit()

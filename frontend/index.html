@@ -3,41 +3,176 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shipcheck - AI Pre-Ship Auditor</title>
+    <title>Shipcheck + Sentinel - Unified Cybersecurity Platform</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="app">
         <header class="header">
-            <div class="header-content" style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
+            <div class="header-content">
+                <div class="header-left">
                     <h1 class="logo">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M9 11l3 3L22 4"></path>
                             <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
                         </svg>
-                        Shipcheck
+                        Shipcheck <span class="logo-sentinel">/ Sentinel</span>
                     </h1>
-                    <p class="tagline">AI Pre-Ship Auditor with Hindsight Memory</p>
+                    <p class="tagline">Application security command center</p>
                 </div>
-                <div id="hindsight-status-badge" class="hindsight-badge" style="display: flex; align-items: center; gap: 8px; background: #e0f2fe; color: #0369a1; padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 500; border: 1px solid #bae6fd;">
-                    <span class="status-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #0284c7;"></span>
-                    <span id="hindsight-status-text">🧠 Hindsight Engine Connected</span>
+                <div class="header-right">
+                    <div id="gemma-status-badge" class="hindsight-badge">
+                        <span class="status-dot"></span>
+                        <span id="gemma-status-text">Gemma Remediation Engine</span>
+                    </div>
+                    <div id="sentinel-status-badge" class="sentinel-badge">
+                        <span class="status-dot"></span>
+                        <span id="sentinel-status-text">Sentinel RASP</span>
+                    </div>
                 </div>
             </div>
         </header>
 
+        <div class="workspace">
+            <aside class="sidebar" aria-label="Primary navigation">
+                <p class="sidebar-label">Workspace</p>
+                <nav class="nav-tabs">
+                    <button class="nav-tab active" data-section="dashboard"><span>▦</span> Dashboard</button>
+                    <button class="nav-tab" data-section="projects"><span>◫</span> Projects</button>
+                    <button class="nav-tab" data-section="scan"><span>◌</span> Scan</button>
+                    <button class="nav-tab" data-section="findings"><span>◇</span> Findings</button>
+                    <button class="nav-tab" data-section="remediation"><span>🔧</span> Remediation</button>
+                    <button class="nav-tab" data-section="editor"><span>⌘</span> Code editor</button>
+                </nav>
+                <p class="sidebar-label">Protect & Verify</p>
+                <nav class="nav-tabs">
+                    <button class="nav-tab" data-section="verification"><span>✓</span> Verification Results</button>
+                    <button class="nav-tab" data-section="sandbox"><span>□</span> Sandbox</button>
+                    <button class="nav-tab" data-section="runtime"><span>⌁</span> Runtime</button>
+                    <button class="nav-tab" data-section="sentinel"><span>◈</span> Sentinel</button>
+                </nav>
+                <div class="sidebar-bottom nav-tabs">
+                    <button class="nav-tab" data-section="reports"><span>▤</span> Reports</button>
+                    <button class="nav-tab" data-section="history"><span>◷</span> History</button>
+                </div>
+            </aside>
         <main class="main">
-            <!-- Project Selection / Upload -->
-            <section id="project-section" class="section active">
-                <div class="card">
-                    <h2>Select or Upload a Project</h2>
-                    <div class="projects-list" id="projects-list">
-                        <div class="loading" id="projects-loading">Loading projects...</div>
+            <!-- Dashboard Section -->
+            <section id="dashboard-section" class="section active">
+                <div class="dashboard-hero">
+                    <div>
+                        <p class="eyebrow">Security posture</p>
+                        <h2>Know what needs attention.</h2>
+                        <p>Review the health of your application and move from detection to action.</p>
+                    </div>
+                    <div class="hero-actions">
+                        <button class="btn btn-secondary dashboard-action" data-section="projects">Manage projects</button>
+                        <button class="btn btn-primary" id="dashboard-scan-btn">Run a scan <span>→</span></button>
+                    </div>
+                </div>
+                <div class="dashboard-metrics">
+                    <div class="metric-card security">
+                        <span class="metric-kicker">Security score</span>
+                        <strong class="metric-value" id="score-security">--</strong>
+                        <span class="metric-note">Static analysis</span>
+                    </div>
+                    <div class="metric-card privacy">
+                        <span class="metric-kicker">Privacy score</span>
+                        <strong class="metric-value" id="score-privacy">--</strong>
+                        <span class="metric-note">Data safeguards</span>
+                    </div>
+                    <div class="metric-card production">
+                        <span class="metric-kicker">Production readiness</span>
+                        <strong class="metric-value" id="score-production">--</strong>
+                        <span class="metric-note">Deployment checks</span>
+                    </div>
+                    <div class="metric-card reliability">
+                        <span class="metric-kicker">Reliability score</span>
+                        <strong class="metric-value" id="score-reliability">--</strong>
+                        <span class="metric-note">Operational health</span>
+                    </div>
+                </div>
+                <div class="dashboard-grid">
+                    <div class="card dashboard-card findings-card">
+                        <div class="card-heading"><div><p class="eyebrow">Triage queue</p><h2>Findings by severity</h2></div><button class="text-button dashboard-action" data-section="findings">View findings →</button></div>
+                        <div class="score-grid" id="dashboard-scores">
+                            <div class="finding-count critical">
+                                <span class="count" id="count-critical">0</span>
+                                <span class="label">Critical</span>
+                            </div>
+                            <div class="finding-count high">
+                                <span class="count" id="count-high">0</span>
+                                <span class="label">High</span>
+                            </div>
+                            <div class="finding-count medium">
+                                <span class="count" id="count-medium">0</span>
+                                <span class="label">Medium</span>
+                            </div>
+                            <div class="finding-count low">
+                                <span class="count" id="count-low">0</span>
+                                <span class="label">Low</span>
+                            </div>
+                            <div class="finding-count info">
+                                <span class="count" id="count-info">0</span>
+                                <span class="label">Info</span>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="divider">or</div>
+                    <div class="card dashboard-card runtime-card">
+                        <div class="card-heading"><div><p class="eyebrow">Live protection</p><h2>Runtime status</h2></div><button class="text-button dashboard-action" data-section="runtime">Open runtime →</button></div>
+                        <div class="runtime-status" id="dashboard-runtime">
+                            <div class="status-item">
+                                <span class="status-label">Sentinel Status:</span>
+                                <span class="status-value" id="runtime-sentinel">Not Enabled</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Total Events:</span>
+                                <span class="status-value" id="runtime-events">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Blocked:</span>
+                                <span class="status-value" id="runtime-blocked">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Suspicious:</span>
+                                <span class="status-value" id="runtime-suspicious">0</span>
+                            </div>
+                        </div>
+                    </div>
 
+                    <div class="card dashboard-card project-card">
+                        <div class="card-heading"><div><p class="eyebrow">Selected project</p><h2>Project details</h2></div><button class="text-button dashboard-action" data-section="projects">Switch project →</button></div>
+                        <div class="project-info" id="dashboard-project">
+                            <div class="info-item">
+                                <span class="info-label">Project:</span>
+                                <span class="info-value" id="project-name">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Technology Stack:</span>
+                                <span class="info-value" id="project-tech">--</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Last Scan:</span>
+                                <span class="info-value" id="project-last-scan">Never</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Total Scans:</span>
+                                <span class="info-value" id="project-total-scans">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Projects Section -->
+            <section id="projects-section" class="section">
+                <div class="card">
+                    <div class="card-heading"><div><h2>Projects</h2></div><button class="text-button danger-button" id="clear-data-btn">Clear all Shipcheck data</button></div>
+                    <div class="projects-list" id="projects-list">
+                        <div class="loading">Loading projects...</div>
+                    </div>
+                    <div class="divider">or</div>
                     <div class="upload-area" id="upload-area">
                         <input type="file" id="zip-upload" accept=".zip" style="display: none;">
                         <div class="upload-content">
@@ -53,8 +188,8 @@
                 </div>
             </section>
 
-            <!-- Scan Progress -->
-            <section id="scan-section" class="section" style="display: none;">
+            <!-- Scan Section -->
+            <section id="scan-section" class="section">
                 <div class="card">
                     <div class="scan-header">
                         <h2>Scan in Progress</h2>
@@ -72,42 +207,42 @@
                         </div>
                         <div class="step" data-step="2">
                             <span class="step-number">2</span>
-                            <span class="step-label">Detecting technologies</span>
+                            <span class="step-label">Running security checks</span>
                             <span class="step-icon"></span>
                         </div>
                         <div class="step" data-step="3">
                             <span class="step-number">3</span>
-                            <span class="step-label">Running security checks</span>
+                            <span class="step-label">Running privacy checks</span>
                             <span class="step-icon"></span>
                         </div>
                         <div class="step" data-step="4">
                             <span class="step-number">4</span>
-                            <span class="step-label">Running privacy checks</span>
+                            <span class="step-label">Running reliability checks</span>
                             <span class="step-icon"></span>
                         </div>
                         <div class="step" data-step="5">
                             <span class="step-number">5</span>
-                            <span class="step-label">Running reliability checks</span>
+                            <span class="step-label">Running production checks</span>
                             <span class="step-icon"></span>
                         </div>
                         <div class="step" data-step="6">
                             <span class="step-number">6</span>
-                            <span class="step-label">Running production checks</span>
+                            <span class="step-label">Running dependency checks</span>
                             <span class="step-icon"></span>
                         </div>
                         <div class="step" data-step="7">
                             <span class="step-number">7</span>
-                            <span class="step-label">Running runtime analysis</span>
+                            <span class="step-label">Running configuration checks</span>
                             <span class="step-icon"></span>
                         </div>
                         <div class="step" data-step="8">
                             <span class="step-number">8</span>
-                            <span class="step-label">Running AI reasoning</span>
+                            <span class="step-label">Running runtime analysis</span>
                             <span class="step-icon"></span>
                         </div>
                         <div class="step" data-step="9">
                             <span class="step-number">9</span>
-                            <span class="step-label">Updating Hindsight memory</span>
+                            <span class="step-label">Running AI reasoning</span>
                             <span class="step-icon"></span>
                         </div>
                         <div class="step" data-step="10">
@@ -119,52 +254,233 @@
                 </div>
             </section>
 
-            <!-- Report View -->
-            <section id="report-section" class="section" style="display: none;">
-                <div class="report-header">
-                    <div class="report-title">
-                        <h2>Pre-Ship Report</h2>
-                        <span class="project-name" id="report-project-name"></span>
-                    </div>
-                    <div class="report-actions">
-                        <button class="btn btn-secondary" id="rescan-btn">Rescan</button>
-                        <button class="btn btn-primary" id="download-btn">Download Report</button>
-                    </div>
-                </div>
-
-                <!-- Summary Cards -->
-                <div class="summary-grid" id="summary-grid"></div>
-
-                <!-- Hindsight Comparison -->
-                <div class="card" id="comparison-card" style="display: none;">
-                    <h3>Hindsight Comparison</h3>
-                    <div class="comparison-summary" id="comparison-summary"></div>
-                    <div class="comparison-details" id="comparison-details"></div>
-                </div>
-
-                <!-- AI Analysis -->
-                <div class="card" id="ai-analysis-card" style="display: none;">
-                    <h3>AI Analysis</h3>
-                    <div class="ai-content" id="ai-content"></div>
-                </div>
-
-                <!-- Findings Tabs -->
+            <!-- Findings Section -->
+            <section id="findings-section" class="section">
                 <div class="card">
-                    <div class="tabs" id="category-tabs">
-                        <button class="tab-btn active" data-category="all">All</button>
-                        <button class="tab-btn" data-category="security">Security</button>
-                        <button class="tab-btn" data-category="privacy">Privacy</button>
-                        <button class="tab-btn" data-category="reliability">Reliability</button>
-                        <button class="tab-btn" data-category="production">Production</button>
-                        <button class="tab-btn" data-category="runtime">Runtime</button>
+                    <div class="findings-header">
+                        <h2>Security Findings</h2>
+                        <div class="findings-filters">
+                            <select id="filter-category" class="filter-select">
+                                <option value="all">All Categories</option>
+                                <option value="security">Security</option>
+                                <option value="privacy">Privacy</option>
+                                <option value="reliability">Reliability</option>
+                                <option value="production">Production</option>
+                                <option value="dependency">Dependency</option>
+                                <option value="configuration">Configuration</option>
+                                <option value="runtime">Runtime</option>
+                            </select>
+                            <select id="filter-severity" class="filter-select">
+                                <option value="all">All Severities</option>
+                                <option value="critical">Critical</option>
+                                <option value="high">High</option>
+                                <option value="medium">Medium</option>
+                                <option value="low">Low</option>
+                                <option value="info">Info</option>
+                            </select>
+                        </div>
                     </div>
-
                     <div class="findings-list" id="findings-list">
                         <div class="loading">Loading findings...</div>
                     </div>
                 </div>
             </section>
+
+            <!-- Code Editor Section -->
+            <section id="editor-section" class="section">
+                <div class="card">
+                    <h2>Code Editor</h2>
+                    <div class="editor-container">
+                        <div class="file-browser" id="file-browser">
+                            <div class="loading">Loading files...</div>
+                        </div>
+                        <div class="code-editor">
+                            <div class="editor-header">
+                                <span id="editor-file-path">Select a file</span>
+                                <div class="editor-actions">
+                                    <button class="btn btn-sm btn-primary" id="editor-save-btn" disabled>Save</button>
+                                    <button class="btn btn-sm btn-download-zip" onclick="downloadProjectZip()" title="Download project with all fixes as ZIP">📦 Download ZIP</button>
+                                </div>
+                            </div>
+                            <textarea id="code-editor" class="code-textarea" placeholder="Select a file to edit..." disabled></textarea>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sandbox Section -->
+            <section id="sandbox-section" class="section">
+                <div class="card">
+                    <h2>Secure Sandbox</h2>
+                    <p class="section-description">Execute projects in an isolated sandbox environment with resource limits and security constraints.</p>
+                    <div class="sandbox-controls">
+                        <button class="btn btn-primary" id="sandbox-execute-btn">Execute in Sandbox</button>
+                        <button class="btn btn-secondary" id="sandbox-stop-btn" disabled>Stop</button>
+                    </div>
+                    <div class="sandbox-status" id="sandbox-status">
+                        <div class="status-item">
+                            <span class="status-label">Status:</span>
+                            <span class="status-value" id="sandbox-status-value">Idle</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Method:</span>
+                            <span class="status-value" id="sandbox-method">--</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Checks:</span>
+                            <span class="status-value" id="sandbox-checks">0</span>
+                        </div>
+                    </div>
+                    <div class="sandbox-results" id="sandbox-results"></div>
+                </div>
+            </section>
+
+            <!-- Runtime Section -->
+            <section id="runtime-section" class="section">
+                <div class="card">
+                    <h2>Runtime Monitoring</h2>
+                    <div class="local-runtime-scan">
+                        <div>
+                            <p class="eyebrow">Docker-free runtime scan</p>
+                            <p class="section-description">Start your trusted app locally, then scan its localhost URL for headers, 404 behavior, and exposed routes.</p>
+                        </div>
+                        <div class="local-runtime-form">
+                            <input id="runtime-url-input" type="url" value="http://127.0.0.1:8001" placeholder="http://127.0.0.1:8001" aria-label="Local application URL">
+                            <button class="btn btn-primary" id="runtime-scan-btn">Scan local app</button>
+                            <button class="btn btn-secondary" id="runtime-connect-btn">Create protected proxy</button>
+                        </div>
+                        <p class="runtime-scan-message" id="runtime-scan-message" aria-live="polite"></p>
+                        <div class="runtime-proxy-result" id="runtime-proxy-result"></div>
+                    </div>
+                    <div class="runtime-dashboard" id="runtime-dashboard">
+                        <div class="runtime-stats">
+                            <div class="runtime-stat">
+                                <div class="stat-value" id="runtime-total-events">0</div>
+                                <div class="stat-label">Total Events</div>
+                            </div>
+                            <div class="runtime-stat">
+                                <div class="stat-value" id="runtime-blocked-events">0</div>
+                                <div class="stat-label">Blocked</div>
+                            </div>
+                            <div class="runtime-stat">
+                                <div class="stat-value" id="runtime-suspicious-events">0</div>
+                                <div class="stat-label">Suspicious</div>
+                            </div>
+                            <div class="runtime-stat">
+                                <div class="stat-value" id="runtime-sql-injection">0</div>
+                                <div class="stat-label">SQL Injection</div>
+                            </div>
+                            <div class="runtime-stat">
+                                <div class="stat-value" id="runtime-xss">0</div>
+                                <div class="stat-label">XSS Attempts</div>
+                            </div>
+                            <div class="runtime-stat">
+                                <div class="stat-value" id="runtime-rate-abuse">0</div>
+                                <div class="stat-label">Rate Abuse</div>
+                            </div>
+                        </div>
+                    </div>
+                    <h3>Recent Security Events</h3>
+                    <div class="events-list" id="runtime-events-list">
+                        <div class="loading">Loading events...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sentinel Section -->
+            <section id="sentinel-section" class="section">
+                <div class="card">
+                    <h2>Sentinel RASP Integration</h2>
+                    <p class="section-description">Integrate Sentinel Runtime Application Self-Protection into your project.</p>
+                    <div class="sentinel-status" id="sentinel-integration-status">
+                        <div class="status-item">
+                            <span class="status-label">Status:</span>
+                            <span class="status-value" id="sentinel-status-value">Not Integrated</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">Framework:</span>
+                            <span class="status-value" id="sentinel-framework">--</span>
+                        </div>
+                    </div>
+                    <div class="sentinel-actions">
+                        <button class="btn btn-secondary" id="sentinel-preview-btn">Preview Integration</button>
+                        <button class="btn btn-primary" id="sentinel-enable-btn" disabled>Enable Sentinel</button>
+                    </div>
+                    <div class="sentinel-preview" id="sentinel-preview" style="display: none;">
+                        <h3>Integration Preview</h3>
+                        <div class="preview-content" id="sentinel-preview-content"></div>
+                        <div class="preview-actions">
+                            <button class="btn btn-primary" id="sentinel-confirm-btn">Review & Enable</button>
+                            <button class="btn btn-secondary" id="sentinel-cancel-btn">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="sentinel-protections" id="sentinel-protections">
+                        <h3>Available Protections</h3>
+                        <div class="protections-list" id="protections-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Reports Section -->
+            <section id="reports-section" class="section">
+                <div class="card">
+                    <h2>Security Reports</h2>
+                    <p class="section-description">Export comprehensive security reports in various formats.</p>
+                    <div class="report-actions">
+                        <button class="btn btn-primary" id="report-json-btn">Export JSON</button>
+                        <button class="btn btn-secondary" id="report-html-btn">Export HTML</button>
+                        <button class="btn btn-secondary" id="report-pdf-btn">Export PDF</button>
+                    </div>
+                    <div class="report-preview" id="report-preview">
+                        <h3>Report Preview</h3>
+                        <div class="preview-content" id="report-preview-content"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Remediation Section -->
+            <section id="remediation-section" class="section">
+                <div class="card">
+                    <div class="card-heading">
+                        <div>
+                            <p class="eyebrow">AI Remediation Workbench</p>
+                            <h2>Gemma Patch Proposals & Review</h2>
+                        </div>
+                    </div>
+                    <div id="remediation-container">
+                        <p>Select a finding from the Findings view to generate a Gemma AI remediation patch.</p>
+                        <div id="remediation-details" class="remediation-details"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Verification Section -->
+            <section id="verification-section" class="section">
+                <div class="card">
+                    <div class="card-heading">
+                        <div>
+                            <p class="eyebrow">Verification Harness</p>
+                            <h2>Dual-Baseline Verification Evidence</h2>
+                        </div>
+                    </div>
+                    <div id="verification-container">
+                        <p>No verification run recorded yet. Approve a patch proposal and click 'Run Verification' to test in a disposable sandbox.</p>
+                        <div id="verification-evidence-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- History Section -->
+            <section id="history-section" class="section">
+                <div class="card">
+                    <h2>Scan History</h2>
+                    <div class="history-list" id="history-list">
+                        <div class="loading">Loading history...</div>
+                    </div>
+                </div>
+            </section>
         </main>
+        </div>
     </div>
 
     <script src="app.js"></script>

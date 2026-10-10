@@ -21,3 +21,20 @@ Thumbs.db
 .vscode/
 .idea/
 .env
+
+# Generated Sentinel runtime artifacts
+sentinel_rasp/**/__pycache__/
+sentinel_rasp/**/*.py[cod]
+sentinel_rasp/python/sentinel/_native/
+sentinel_rasp/python/sentinel/_logs/
+sentinel_rasp/examples/**/security-events.json
+backend/native/shipcheck_inspector.dll
+backend/native/shipcheck_inspector.so
+backend/native/shipcheck_inspector_v*.dll
+backend/native/shipcheck_inspector_v*.so
+
+# Build and distribution
+build/
+dist/
+*.exe
+cloudflared.exe

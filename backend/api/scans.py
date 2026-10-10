@@ -6,9 +6,9 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-from models.schemas import ScanCreate, ScanResponse, ScanStatus
-from database.schema import get_db
-from services.scanner import ScannerService
+from backend.models.schemas import ScanCreate, ScanResponse, ScanStatus
+from backend.database.schema import get_db
+from backend.services.scanner import ScannerService
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
 
@@ -38,6 +38,7 @@ async def create_scan(scan: ScanCreate, background_tasks: BackgroundTasks):
 
     # Initialize scan status
     scan_status[scan_id] = {
+        "project_id": scan.project_id,
         "status": ScanStatus.QUEUED,
         "progress": 0,
         "message": "Queued",
@@ -60,8 +61,8 @@ async def run_scan_background(scan_id: str, project_id: str):
     import traceback
     print(f"[BACKGROUND] Starting scan {scan_id} for project {project_id}")
     try:
-        from services.scanner import ScannerService
-        from database.schema import get_project_dir
+        from backend.services.scanner import ScannerService
+        from backend.database.schema import get_project_dir
     except Exception as e:
         print(f"[BACKGROUND] Import error: {e}")
         traceback.print_exc()
@@ -141,9 +142,14 @@ async def get_scan(scan_id: str):
     if scan_id in scan_status:
         status_info = scan_status[scan_id]
         started_at = status_info.get("started_at", datetime.utcnow().isoformat())
+        proj_id = status_info.get("project_id", "")
+        if not proj_id:
+            with get_db() as conn:
+                r = conn.execute("SELECT project_id FROM scans WHERE id = ?", (scan_id,)).fetchone()
+                if r: proj_id = r[0]
         return ScanResponse(
             id=scan_id,
-            project_id="",  # Will be filled from DB
+            project_id=proj_id,
             status=status_info["status"],
             created_at=datetime.fromisoformat(started_at),
             completed_at=datetime.utcnow() if status_info["status"] in [ScanStatus.COMPLETED, ScanStatus.FAILED] else None,

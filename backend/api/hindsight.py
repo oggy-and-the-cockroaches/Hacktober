@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 
-from services.hindsight import HindsightService
+from backend.services.hindsight import HindsightService
 
 router = APIRouter(prefix="/api/hindsight", tags=["hindsight"])
 

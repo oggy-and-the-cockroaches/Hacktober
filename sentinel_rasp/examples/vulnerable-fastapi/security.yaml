@@ -1,0 +1,12 @@
+name: prevent_secret_exfiltration
+when:
+  event: SECRET_ACCESS
+forbid:
+  event: NETWORK_SEND
+condition:
+  destination: UNTRUSTED
+action: [BLOCK, LOG]
+database:
+  block_unsafe_dynamic_sql: true
+html:
+  block_unsafe_reflected_html: true

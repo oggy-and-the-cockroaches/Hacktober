@@ -11,6 +11,7 @@ class ScanStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    PARTIAL = "partial"
 
 
 class Severity(str, Enum):
@@ -25,6 +26,25 @@ class FindingStatus(str, Enum):
     OPEN = "open"
     FIXED = "fixed"
     ACKNOWLEDGED = "acknowledged"
+    IGNORED = "ignored"
+    FALSE_POSITIVE = "false_positive"
+
+
+class Confidence(str, Enum):
+    CONFIRMED = "confirmed"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class DetectionSource(str, Enum):
+    STATIC = "STATIC"
+    DYNAMIC = "DYNAMIC"
+    DEPENDENCY = "DEPENDENCY"
+    CONFIGURATION = "CONFIGURATION"
+    RUNTIME = "RUNTIME"
+    AI = "AI"
+    MULTIPLE = "MULTIPLE"
 
 
 class ProjectCreate(BaseModel):
@@ -68,6 +88,12 @@ class FindingResponse(BaseModel):
     status: FindingStatus
     first_detected_scan: Optional[str] = None
     last_detected_scan: Optional[str] = None
+    ai_explanation: Optional[str] = None
+    suggested_fix: Optional[str] = None
+    existing_solution: Optional[str] = None
+    project_specific_solution: Optional[str] = None
+    detection_source: Optional[str] = None
+    validation_status: Optional[str] = None
 
 
 class HindsightEntry(BaseModel):
@@ -90,3 +116,45 @@ class ScanComparison(BaseModel):
     unresolved_findings: List[Dict[str, Any]] = Field(default_factory=list)
     new_findings: List[Dict[str, Any]] = Field(default_factory=list)
     reintroduced_findings: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class SandboxExecutionResponse(BaseModel):
+    execution_id: str
+    project_id: str
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+class SentinelIntegrationResponse(BaseModel):
+    project_id: str
+    framework: str
+    changes: List[Dict[str, Any]]
+    dependencies: List[str]
+    protection_features: List[str]
+    files_modified: List[str]
+    estimated_latency: str
+
+
+class FixValidationResponse(BaseModel):
+    validation_id: str
+    finding_id: str
+    fix_applied: bool
+    rescan_result: Dict[str, Any]
+    comparison: Dict[str, Any]
+    validated: bool
+    timestamp: datetime
+
+
+class RuntimeEventResponse(BaseModel):
+    id: int
+    project_id: str
+    event_type: str
+    endpoint: Optional[str] = None
+    action: str
+    confidence: str
+    evidence: Optional[str] = None
+    timestamp: datetime
+    request_id: Optional[str] = None
