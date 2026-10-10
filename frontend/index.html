@@ -24,6 +24,10 @@
                     <p class="tagline">Application security command center</p>
                 </div>
                 <div class="header-right">
+                    <div id="backend-status-badge" class="hindsight-badge offline" title="FastAPI Backend Status">
+                        <span class="status-dot"></span>
+                        <span id="backend-status-text">FastAPI: Connecting...</span>
+                    </div>
                     <div id="gemma-status-badge" class="hindsight-badge">
                         <span class="status-dot"></span>
                         <span id="gemma-status-text">Gemma Remediation Engine</span>
@@ -60,6 +64,18 @@
                 </div>
             </aside>
         <main class="main">
+            <!-- Offline Resilience Banner -->
+            <div id="offline-banner" class="offline-banner" style="display: none;">
+                <div class="offline-banner-content">
+                    <span class="offline-icon">⚡</span>
+                    <div>
+                        <strong>Offline Interactive Mode</strong> — FastAPI backend is currently offline. Displaying interactive cached workspace.
+                        <span class="offline-hint">To enable live automated scanning and AI remediation, start FastAPI: <code>python -m uvicorn backend.main:app --reload</code></span>
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-secondary" id="retry-backend-btn">Retry Connection</button>
+            </div>
+
             <!-- Dashboard Section -->
             <section id="dashboard-section" class="section active">
                 <div class="dashboard-hero">
