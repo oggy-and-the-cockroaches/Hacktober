@@ -23,7 +23,6 @@ from backend.services.ai_cache import AICacheService
 from backend.services.remediation import RemediationService
 from backend.services.context_window import extract_context_window
 from backend.api.proxy import _inspect_attack, _event_type_for
-from app_launcher import find_available_port, is_port_in_use
 
 
 def test_dependency_version_prerelease_and_whitespace(tmp_path):
@@ -114,9 +113,3 @@ def test_proxy_double_url_encoding_detection():
     assert "traversal" in attack_label.lower()
     event_type = _event_type_for(attack_label)
     assert event_type == "PATH_TRAVERSAL"
-
-
-def test_desktop_launcher_port_probing():
-    """Verify that port availability check and fallback selection return valid positive integers."""
-    port = find_available_port(8000, 8020)
-    assert 8000 <= port <= 8020

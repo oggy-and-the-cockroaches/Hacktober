@@ -361,25 +361,54 @@ async def update_file_content(project_id: str, file_path: str, content: str):
 
 
 @router.delete("")
+@router.delete("/clear-all")
+@router.post("/clear-all")
 async def clear_all_projects():
-    """Remove all locally stored Shipcheck projects, scans, findings, and uploads."""
+    """Remove all locally stored Shipcheck projects, scans, findings, AI cache, and uploads."""
     projects_root = get_project_dir("_clear_probe_").parent
+    project_count = 0
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM projects")
-        project_count = cursor.fetchone()[0]
-        # Explicitly remove tables that are not all covered by project foreign keys
-        # in databases created by early Shipcheck versions.
-        for table in ("runtime_events", "sandbox_executions", "dependencies", "scan_comparisons", "hindsight_memory", "fix_validations", "findings", "scans", "sentinel_integrations", "projects"):
-            cursor.execute(f"DELETE FROM {table}")
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        existing_tables = {row[0] for row in cursor.fetchall()}
+
+        if "projects" in existing_tables:
+            cursor.execute("SELECT COUNT(*) FROM projects")
+            project_count = cursor.fetchone()[0]
+
+        cursor.execute("PRAGMA foreign_keys = OFF")
+        for table in (
+            "ai_analysis_cache",
+            "remediation_verifications",
+            "remediation_proposals",
+            "runtime_events",
+            "sandbox_executions",
+            "dependencies",
+            "scan_comparisons",
+            "hindsight_memory",
+            "fix_validations",
+            "findings",
+            "scans",
+            "sentinel_integrations",
+            "projects",
+        ):
+            if table in existing_tables:
+                try:
+                    cursor.execute(f"DELETE FROM {table}")
+                except Exception:
+                    pass
+        cursor.execute("PRAGMA foreign_keys = ON")
 
     if projects_root.exists():
         for child in projects_root.iterdir():
-            if child.is_dir():
-                shutil.rmtree(child)
-            elif child.is_file():
-                child.unlink()
-    return {"message": "All local Shipcheck data cleared", "projects_deleted": project_count}
+            try:
+                if child.is_dir():
+                    shutil.rmtree(child)
+                elif child.is_file():
+                    child.unlink()
+            except Exception:
+                pass
+    return {"message": "All local Shipcheck data and AI cache cleared", "projects_deleted": project_count}
 
 
 @router.delete("/{project_id}")

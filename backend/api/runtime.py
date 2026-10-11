@@ -87,6 +87,139 @@ async def scan_local_runtime(project_id: str, payload: dict):
     }
 
 
+@router.post("/scan-direct")
+async def scan_direct_runtime(payload: dict):
+    """Run safe HTTP checks against a developer-started local application."""
+    raw_url = payload.get("url") or payload.get("target_url") or "http://127.0.0.1:8001"
+    target_url = _validate_local_target(str(raw_url))
+
+    raw_project_id = payload.get("project_id")
+    project_id = None
+    if raw_project_id and str(raw_project_id).strip() not in {"undefined", "null", ""}:
+        with get_db() as conn:
+            row = conn.execute("SELECT id FROM projects WHERE id = ?", (str(raw_project_id).strip(),)).fetchone()
+            if row:
+                project_id = row[0]
+
+    if not project_id:
+        with get_db() as conn:
+            row = conn.execute("SELECT id FROM projects ORDER BY created_at DESC LIMIT 1").fetchone()
+            if row:
+                project_id = row[0]
+            else:
+                project_id = "default-runtime"
+                conn.execute("INSERT OR IGNORE INTO projects (id, name) VALUES (?, ?)", (project_id, "Local Runtime App"))
+
+    monitoring = RuntimeMonitoringService(project_id)
+    try:
+        home_status, home_headers = await asyncio.to_thread(_local_get, target_url)
+        header_names = {name.lower() for name in home_headers}
+        missing_headers = [header for header in (
+            "X-Content-Type-Options", "X-Frame-Options", "Content-Security-Policy", "Referrer-Policy"
+        ) if header.lower() not in header_names]
+        missing_404_status, _ = await asyncio.to_thread(_local_get, f"{target_url}/shipcheck-not-found-probe-404")
+
+        exposed = []
+        for path in ("/.env", "/admin", "/debug", "/metrics", "/backup"):
+            status, _ = await asyncio.to_thread(_local_get, f"{target_url}{path}")
+            if status == 200:
+                exposed.append(path)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach local application at {target_url}: {exc}")
+
+    events = []
+    header_action = "SUSPICIOUS" if missing_headers else "LOGGED"
+    events.append(monitoring.record_event({
+        "event_type": "SECURITY_HEADERS", "endpoint": target_url, "action": header_action,
+        "confidence": "HIGH", "evidence": "Missing headers: " + ", ".join(missing_headers) if missing_headers else "Required headers detected."
+    }))
+    events.append(monitoring.record_event({
+        "event_type": "HTTP_404", "endpoint": f"{target_url}/shipcheck-not-found-probe-404",
+        "action": "LOGGED" if missing_404_status == 404 else "SUSPICIOUS", "confidence": "HIGH",
+        "evidence": f"Unknown-route response status: {missing_404_status}"
+    }))
+    if exposed:
+        events.append(monitoring.record_event({
+            "event_type": "EXPOSED_ENDPOINT", "endpoint": target_url, "action": "SUSPICIOUS",
+            "confidence": "HIGH", "evidence": "Publicly reachable paths: " + ", ".join(exposed)
+        }))
+
+    findings_count = len(missing_headers) + (1 if missing_404_status != 404 else 0) + len(exposed)
+    return {
+        "success": True,
+        "target_url": target_url,
+        "status_code": home_status,
+        "findings_count": findings_count,
+        "missing_headers": missing_headers,
+        "not_found_status": missing_404_status,
+        "exposed_endpoints": exposed,
+        "events_recorded": len(events)
+    }
+
+
+@router.get("/stats")
+async def get_all_runtime_stats():
+    """Get aggregated runtime statistics."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM runtime_events")
+        total_events = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM runtime_events WHERE action = 'BLOCKED'")
+        blocked = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM runtime_events WHERE action = 'SUSPICIOUS'")
+        suspicious = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM runtime_events WHERE event_type IN ('DB_QUERY', 'BLIND_SQL_INJECTION')")
+        sql_injection = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM runtime_events WHERE event_type IN ('HTML_RENDER', 'HTML_INJECTION', 'XSS')")
+        xss = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM runtime_events WHERE event_type = 'RATE_ANOMALY'")
+        rate_abuse = cursor.fetchone()[0]
+
+    return {
+        "total_events": total_events,
+        "blocked": blocked,
+        "suspicious": suspicious,
+        "sql_injection": sql_injection,
+        "xss": xss,
+        "rate_abuse": rate_abuse
+    }
+
+
+@router.get("/events")
+async def get_all_runtime_events(limit: int = 50):
+    """Get recent runtime events across projects."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, event_type, endpoint, action, confidence, evidence, timestamp, request_id, project_id
+            FROM runtime_events
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """, (limit,))
+        events = []
+        for row in cursor.fetchall():
+            events.append({
+                "id": row[0],
+                "event_type": row[1],
+                "endpoint": row[2],
+                "action": row[3],
+                "confidence": row[4],
+                "evidence": row[5],
+                "timestamp": row[6],
+                "request_id": row[7],
+                "project_id": row[8]
+            })
+    return {
+        "events": events,
+        "count": len(events)
+    }
+
+
 @router.get("/{project_id}/status")
 async def get_runtime_status(project_id: str):
     """Get runtime security status for a project."""
@@ -164,3 +297,4 @@ async def get_runtime_dashboard(project_id: str):
         "recent_events": events,
         "timestamp": datetime.utcnow().isoformat()
     }
+

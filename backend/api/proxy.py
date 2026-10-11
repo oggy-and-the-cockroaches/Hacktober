@@ -28,7 +28,7 @@ _servers: dict[str, ThreadingHTTPServer] = {}
 _cloudflared_processes: dict[str, subprocess.Popen] = {}
 _cloudflared_urls: dict[str, str] = {}
 _request_windows: dict[tuple[str, str, str], list[float]] = {}
-RATE_LIMIT_REQUESTS = 1
+RATE_LIMIT_REQUESTS = int(os.environ.get("SHIPCHECK_PROXY_RATE_LIMIT", "60"))
 RATE_LIMIT_WINDOW_SECONDS = 2
 ROUTE_BURST_REQUESTS = 120
 
@@ -112,11 +112,24 @@ def _rate_limit_reason(project_id: str, client_id: str, path: str) -> str | None
 
 
 def _local_url(value: str) -> str:
+    if not value or not str(value).strip():
+        raise HTTPException(400, "Please provide a valid application URL (e.g. http://127.0.0.1:8001).")
     parsed = urlparse(value.strip())
     if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-        raise HTTPException(400, "Only a localhost API URL is allowed.")
+        raise HTTPException(400, "Only a localhost API URL is allowed (for example http://127.0.0.1:8001).")
     if parsed.username or parsed.password:
         raise HTTPException(400, "URLs with credentials are not allowed.")
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    # Prevent self-forwarding to Shipcheck Dashboard / API server on port 8000
+    if port == 8000:
+        raise HTTPException(400, "Target URL cannot point to the Shipcheck dashboard/API server on port 8000. Point to your application server (e.g. http://127.0.0.1:8001).")
+
+    # Prevent forwarding loops to active proxy listeners
+    active_ports = {srv.server_address[1] for srv in _servers.values() if srv and hasattr(srv, "server_address")}
+    if port in active_ports:
+        raise HTTPException(400, f"Target URL cannot point to an active proxy port ({port}). Point to your application server (e.g. http://127.0.0.1:8001).")
+
     return value.rstrip("/")
 
 
@@ -193,7 +206,7 @@ def _start_cloudflared_tunnel(project_id: str, port: int) -> str | None:
 
         t = threading.Thread(target=read_stderr, daemon=True)
         t.start()
-        t.join(timeout=10.0)
+        t.join(timeout=3.0)
 
         # Verify process is still alive and didn't crash
         if proc.poll() is not None:
@@ -207,57 +220,153 @@ def _start_cloudflared_tunnel(project_id: str, port: int) -> str | None:
         return None
 
 
-@router.post("/{project_id}/connect")
-async def connect_proxy(project_id: str, payload: dict):
-    """Discover a local OpenAPI service and register it as a proxy target."""
-    with get_db() as conn:
-        if not conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
-            raise HTTPException(404, "Project not found")
-    target = _local_url(str(payload.get("url", "")))
-    try:
-        document = await asyncio.to_thread(_fetch_json, f"{target}/openapi.json")
-    except Exception as exc:
-        raise HTTPException(502, f"Could not read OpenAPI schema at {target}/openapi.json: {exc}")
+@router.post("/create")
+async def create_proxy_endpoint(payload: dict):
+    """Start a protected proxy forwarding to a local application."""
+    raw_target = payload.get("target_url") or payload.get("url") or "http://127.0.0.1:8001"
+    target = _local_url(str(raw_target))
 
-    paths = document.get("paths", {})
-    endpoints = [
-        {"path": path, "methods": [method.upper() for method in spec if method.lower() in {"get", "post", "put", "patch", "delete", "head", "options"}]}
-        for path, spec in paths.items()
-    ]
+    raw_project_id = payload.get("project_id")
+    project_id = None
+    if raw_project_id and str(raw_project_id).strip() not in {"undefined", "null", ""}:
+        with get_db() as conn:
+            row = conn.execute("SELECT id FROM projects WHERE id = ?", (str(raw_project_id).strip(),)).fetchone()
+            if row:
+                project_id = row[0]
+
+    if not project_id:
+        with get_db() as conn:
+            row = conn.execute("SELECT id FROM projects ORDER BY created_at DESC LIMIT 1").fetchone()
+            if row:
+                project_id = row[0]
+            else:
+                project_id = "default-runtime"
+                conn.execute("INSERT OR IGNORE INTO projects (id, name) VALUES (?, ?)", (project_id, "Local Runtime App"))
+
     _targets[project_id] = target
     port = _start_proxy(project_id, target)
     public_url = await asyncio.to_thread(_start_cloudflared_tunnel, project_id, port)
+    proxy_url = f"http://127.0.0.1:{port}"
+
     return {
-        "target_url": target, "title": document.get("info", {}).get("title", "Local API"),
-        "endpoints": endpoints,
-        "proxy_base_url": f"http://127.0.0.1:{port}",
+        "success": True,
+        "proxy_url": proxy_url,
+        "proxy_base_url": proxy_url,
+        "target_url": target,
+        "port": port,
+        "project_id": project_id,
+        "active": True,
+        "status": "active",
         "public_url": public_url,
+        "waf_engine": "Hyperion C++ Engine" if native_inspector.available else "Python Signature Engine",
         "rate_limit": {"requests": RATE_LIMIT_REQUESTS, "window_seconds": RATE_LIMIT_WINDOW_SECONDS},
-        "message": "Point your frontend API base URL to the protected localhost proxy URL shown above."
+        "message": f"Protected proxy active on port {port} forwarding to {target}. Route traffic through {proxy_url} to enable real-time WAF inspection and RASP blocking."
     }
 
 
+@router.post("/{project_id}/connect")
+async def connect_proxy(project_id: str, payload: dict):
+    """Discover a local OpenAPI service (optional) and register it as a proxy target."""
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
+            conn.execute("INSERT OR IGNORE INTO projects (id, name) VALUES (?, ?)", (project_id, "Local Runtime App"))
+
+    raw_target = payload.get("target_url") or payload.get("url") or "http://127.0.0.1:8001"
+    target = _local_url(str(raw_target))
+
+    endpoints = []
+    title = "Local API"
+    try:
+        document = await asyncio.to_thread(_fetch_json, f"{target}/openapi.json")
+        paths = document.get("paths", {})
+        endpoints = [
+            {"path": path, "methods": [method.upper() for method in spec if method.lower() in {"get", "post", "put", "patch", "delete", "head", "options"}]}
+            for path, spec in paths.items()
+        ]
+        title = document.get("info", {}).get("title", "Local API")
+    except Exception:
+        pass
+
+    _targets[project_id] = target
+    port = _start_proxy(project_id, target)
+    public_url = await asyncio.to_thread(_start_cloudflared_tunnel, project_id, port)
+    proxy_url = f"http://127.0.0.1:{port}"
+
+    return {
+        "success": True,
+        "proxy_url": proxy_url,
+        "proxy_base_url": proxy_url,
+        "target_url": target,
+        "title": title,
+        "endpoints": endpoints,
+        "port": port,
+        "project_id": project_id,
+        "active": True,
+        "status": "active",
+        "public_url": public_url,
+        "waf_engine": "Hyperion C++ Engine" if native_inspector.available else "Python Signature Engine",
+        "rate_limit": {"requests": RATE_LIMIT_REQUESTS, "window_seconds": RATE_LIMIT_WINDOW_SECONDS},
+        "message": f"Point your frontend API base URL to the protected localhost proxy URL {proxy_url} shown above."
+    }
+
+
+@router.get("/status")
+@router.get("/{project_id}/status")
+async def get_proxy_status(project_id: str = None):
+    """Get active proxy status for the specified or default project."""
+    if not project_id or project_id not in _servers:
+        if _servers:
+            project_id = next(iter(_servers.keys()))
+        else:
+            return {"active": False, "proxy_url": None, "proxy_base_url": None, "target_url": None, "port": None}
+
+    server = _servers.get(project_id)
+    port = server.server_address[1] if server else None
+    proxy_url = f"http://127.0.0.1:{port}" if port else None
+    return {
+        "active": bool(server is not None),
+        "project_id": project_id,
+        "proxy_url": proxy_url,
+        "proxy_base_url": proxy_url,
+        "target_url": _targets.get(project_id),
+        "port": port,
+        "waf_engine": "Hyperion C++ Engine" if native_inspector.available else "Python Signature Engine"
+    }
+
+
+@router.delete("/disconnect")
+@router.post("/disconnect")
 @router.delete("/{project_id}/disconnect")
-async def disconnect_proxy(project_id: str):
-    _targets.pop(project_id, None)
-    server = _servers.pop(project_id, None)
-    if server:
-        server.shutdown()
-        server.server_close()
-    proc = _cloudflared_processes.pop(project_id, None)
-    if proc:
-        try:
-            proc.terminate()
-            proc.wait(timeout=1.5)
-        except Exception:
+@router.post("/{project_id}/disconnect")
+async def disconnect_proxy(project_id: str = None):
+    """Stop proxy listener and clean up running processes."""
+    targets_to_remove = [project_id] if project_id and project_id in _servers else list(_servers.keys())
+    if not targets_to_remove and project_id:
+        targets_to_remove = [project_id]
+
+    for pid in targets_to_remove:
+        _targets.pop(pid, None)
+        server = _servers.pop(pid, None)
+        if server:
             try:
-                proc.kill()
+                server.shutdown()
+                server.server_close()
             except Exception:
                 pass
-    _cloudflared_urls.pop(project_id, None)
-    for key in [key for key in _request_windows if key[0] == project_id]:
-        del _request_windows[key]
-    return {"disconnected": True}
+        proc = _cloudflared_processes.pop(pid, None)
+        if proc:
+            try:
+                proc.terminate()
+                proc.wait(timeout=1.5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        _cloudflared_urls.pop(pid, None)
+        for key in [key for key in _request_windows if key[0] == pid]:
+            del _request_windows[key]
+    return {"disconnected": True, "active": False, "message": "Proxy listener disconnected."}
 
 
 def _forward(method: str, url: str, body: bytes, headers: dict[str, str]):
@@ -354,15 +463,40 @@ def _make_handler(project_id: str, target: str):
 
 
 def _start_proxy(project_id: str, target: str) -> int:
+    import socket
     existing = _servers.pop(project_id, None)
     if existing:
-        existing.shutdown()
-        existing.server_close()
+        try:
+            existing.shutdown()
+            existing.server_close()
+        except Exception:
+            pass
     # Port 0 delegates collision-free random-port selection to the OS.
     server = ThreadingHTTPServer(("127.0.0.1", 0), _make_handler(project_id, target))
+    port = server.server_address[1]
     _servers[project_id] = server
     threading.Thread(target=server.serve_forever, name=f"shipcheck-proxy-{project_id[:8]}", daemon=True).start()
-    return server.server_address[1]
+
+    # Verify listener is active and accepting connections
+    reachable = False
+    for _ in range(20):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.1):
+                reachable = True
+                break
+        except Exception:
+            time.sleep(0.05)
+
+    if not reachable:
+        _servers.pop(project_id, None)
+        try:
+            server.shutdown()
+            server.server_close()
+        except Exception:
+            pass
+        raise HTTPException(500, f"Failed to start and verify reachability of proxy listener on port {port}.")
+
+    return port
 
 
 @router.api_route("/{project_id}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])

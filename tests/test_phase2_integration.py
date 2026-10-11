@@ -19,26 +19,31 @@ from backend.services.scanner import ScannerService
 
 import database.schema as db_schema
 from backend.database import schema as backend_schema
+from backend.services.llm import GemmaProvider
 
 
 @pytest.fixture(autouse=True)
 def _isolate_env(tmp_path, monkeypatch):
     """Isolate database and project storage for each test."""
     db_path = str(tmp_path / "test.db")
-    projects_dir = str(tmp_path / "projects")
-    monkeypatch.setenv("SHIPCHECK_PROJECTS_DIR", projects_dir)
-    monkeypatch.setenv("SHIPCHECK_DB_PATH", db_path)
+    class MockLLM:
+        def generate_json(self, prompt, system_prompt=None):
+            return {"priorities": []}
+        def generate(self, prompt, system_prompt=None):
+            return "{}"
+
+    mock_llm = MockLLM()
+    monkeypatch.setattr("backend.services.scanner.get_llm", lambda: mock_llm)
+    monkeypatch.setattr("backend.services.llm.get_llm", lambda: mock_llm)
+    monkeypatch.setattr(
+        GemmaProvider,
+        "generate_json",
+        lambda self, prompt, system_prompt=None: {"priorities": []}
+    )
     db_schema.DATABASE_PATH = db_path
     backend_schema.DATABASE_PATH = db_path
     db_schema.init_db()
     yield
-    for conn in sqlite3.connect(db_path).execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ):
-        try:
-            sqlite3.connect(db_path).execute(f"DROP TABLE IF EXISTS {conn[0]}")
-        except Exception:
-            pass
 
 
 def _create_project(tmp_path, files):

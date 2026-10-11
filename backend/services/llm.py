@@ -205,18 +205,10 @@ Respond with JSON containing:
 """
         res = self.generate_json(prompt)
         if not isinstance(res, dict) or "error" in res or "patch_diff" not in res:
-            res = {
-                "finding_id": finding.get("id"),
-                "summary": f"Remediation patch proposal for {finding.get('title')}",
-                "root_cause": "Vulnerability identified during code audit",
-                "file_path": finding.get("file_path", ""),
-                "patch_diff": f"--- {finding.get('file_path')}\n+++ {finding.get('file_path')}\n# Fix applied for {finding.get('title')}",
-                "recommended_tests": ["test_remediation_regression"],
-                "expected_security_effect": "Remediates detected risk without side effects",
-                "limitations": "Ensure manual review of generated fix",
-                "model_provider": "gemma",
-                "model_identifier": self.model_name
-            }
+            from backend.services.fix_synthesis import synthesize_ai_remediation
+            res = synthesize_ai_remediation(finding, code_context)
+            res["model_provider"] = "gemma"
+            res["model_identifier"] = self.model_name
         else:
             res["finding_id"] = finding.get("id")
             res["model_provider"] = "gemma"

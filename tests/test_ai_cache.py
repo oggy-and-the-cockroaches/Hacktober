@@ -14,6 +14,9 @@ def _isolate_env(tmp_path, monkeypatch):
     projects_dir = str(tmp_path / "projects")
     monkeypatch.setenv("SHIPCHECK_PROJECTS_DIR", projects_dir)
     monkeypatch.setenv("SHIPCHECK_DB_PATH", db_path)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMMA_API_KEY", raising=False)
+    monkeypatch.delenv("GEMMA_ENDPOINT", raising=False)
     db_schema.DATABASE_PATH = db_path
     db_schema.init_db()
     yield

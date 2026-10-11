@@ -30,7 +30,7 @@
                     </div>
                     <div id="gemma-status-badge" class="hindsight-badge">
                         <span class="status-dot"></span>
-                        <span id="gemma-status-text">Gemma Remediation Engine</span>
+                        <span id="gemma-status-text">Gemma AI Security</span>
                     </div>
                     <div id="sentinel-status-badge" class="sentinel-badge">
                         <span class="status-dot"></span>
@@ -48,12 +48,9 @@
                     <button class="nav-tab" data-section="projects"><span>◫</span> Projects</button>
                     <button class="nav-tab" data-section="scan"><span>◌</span> Scan</button>
                     <button class="nav-tab" data-section="findings"><span>◇</span> Findings</button>
-                    <button class="nav-tab" data-section="remediation"><span>🔧</span> Remediation</button>
-                    <button class="nav-tab" data-section="editor"><span>⌘</span> Code editor</button>
                 </nav>
-                <p class="sidebar-label">Protect & Verify</p>
+                <p class="sidebar-label">Protect & Runtime</p>
                 <nav class="nav-tabs">
-                    <button class="nav-tab" data-section="verification"><span>✓</span> Verification Results</button>
                     <button class="nav-tab" data-section="sandbox"><span>□</span> Sandbox</button>
                     <button class="nav-tab" data-section="runtime"><span>⌁</span> Runtime</button>
                     <button class="nav-tab" data-section="sentinel"><span>◈</span> Sentinel</button>
@@ -305,28 +302,6 @@
                 </div>
             </section>
 
-            <!-- Code Editor Section -->
-            <section id="editor-section" class="section">
-                <div class="card">
-                    <h2>Code Editor</h2>
-                    <div class="editor-container">
-                        <div class="file-browser" id="file-browser">
-                            <div class="loading">Loading files...</div>
-                        </div>
-                        <div class="code-editor">
-                            <div class="editor-header">
-                                <span id="editor-file-path">Select a file</span>
-                                <div class="editor-actions">
-                                    <button class="btn btn-sm btn-primary" id="editor-save-btn" disabled>Save</button>
-                                    <button class="btn btn-sm btn-download-zip" onclick="downloadProjectZip()" title="Download project with all fixes as ZIP">📦 Download ZIP</button>
-                                </div>
-                            </div>
-                            <textarea id="code-editor" class="code-textarea" placeholder="Select a file to edit..." disabled></textarea>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
             <!-- Sandbox Section -->
             <section id="sandbox-section" class="section">
                 <div class="card">
@@ -453,38 +428,6 @@
                     <div class="report-preview" id="report-preview">
                         <h3>Report Preview</h3>
                         <div class="preview-content" id="report-preview-content"></div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Remediation Section -->
-            <section id="remediation-section" class="section">
-                <div class="card">
-                    <div class="card-heading">
-                        <div>
-                            <p class="eyebrow">AI Remediation Workbench</p>
-                            <h2>Gemma Patch Proposals & Review</h2>
-                        </div>
-                    </div>
-                    <div id="remediation-container">
-                        <p>Select a finding from the Findings view to generate a Gemma AI remediation patch.</p>
-                        <div id="remediation-details" class="remediation-details"></div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Verification Section -->
-            <section id="verification-section" class="section">
-                <div class="card">
-                    <div class="card-heading">
-                        <div>
-                            <p class="eyebrow">Verification Harness</p>
-                            <h2>Dual-Baseline Verification Evidence</h2>
-                        </div>
-                    </div>
-                    <div id="verification-container">
-                        <p>No verification run recorded yet. Approve a patch proposal and click 'Run Verification' to test in a disposable sandbox.</p>
-                        <div id="verification-evidence-list"></div>
                     </div>
                 </div>
             </section>

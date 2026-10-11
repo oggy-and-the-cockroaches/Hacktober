@@ -78,8 +78,13 @@ async def version():
 if getattr(sys, "frozen", False):
     base_dir = getattr(sys, "_MEIPASS", os.path.dirname(__file__))
     frontend_dir = os.path.join(base_dir, "frontend")
+    web_dir = os.path.join(base_dir, "web")
 else:
     frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+    web_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
+
+if os.path.exists(web_dir):
+    app.mount("/web", StaticFiles(directory=web_dir, html=True), name="web")
 
 if os.path.exists(frontend_dir):
     app.mount("/static", StaticFiles(directory=frontend_dir), name="static")

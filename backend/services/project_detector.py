@@ -57,9 +57,12 @@ class ProjectDetector:
         }
 
         found = set()
-        for ext, lang in extensions.items():
-            if list(self.project_root.rglob(f"*{ext}")):
-                found.add(lang)
+        for root, dirs, files in os.walk(self.project_root):
+            dirs[:] = [d for d in dirs if d not in {".git", "node_modules", "venv", ".venv", "__pycache__", ".pytest_cache"}]
+            for file in files:
+                ext = Path(file).suffix.lower()
+                if ext in extensions:
+                    found.add(extensions[ext])
         self.detected["languages"] = sorted(list(found))
 
     def _detect_frameworks(self):
